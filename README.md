@@ -1,3 +1,5 @@
+# McApp initial release with draft install guide server component and webapp directory
+
 # McAdvChat - MeshCom Advanced Chat - Robuste Echtzeit-Übertragung von Chatnachrichten über fehleranfällige Broadcast-Kanäle mittels Paketfragmentierung, Kompression und Vorwärtsfehlerkorrektur
 
 Titel
