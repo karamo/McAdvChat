@@ -11,6 +11,7 @@ Zusammenfassung
 Dieses Projekt beschreibt ein (browserbasiertes) Übertragungsprotokoll für eine Gruppenkommunikation über einen geteilten Broadcast-Kanal mit hoher Fehlerrate. Ziel ist es, Textnachrichten in Echtzeit zu übertragen, wobei jede Nachricht in kleine, robust übertragbare Pakete aufgeteilt wird. Die Nachrichten werden komprimiert, mit Vorwärtsfehlerkorrektur (FEC) versehen und in kleinen, JSON-sicheren Fragmenten (max. 149 Byte pro Paket) gesendet. Ein Nachrichtendigest (MD5) wird zur Verifikation der vollständigen Nachricht eingesetzt. Optionale, selektive Retransmission einzelner Fragmente erhöht die Robustheit bei Paketverlust.
 
 Technische Details
+
 	•	Kanalmodell: öffentlich geteiltes Medium, kein Hidden-Node-Problem, hohe Paketfehlerwahrscheinlichkeit bei steigender Payloadgröße.
 	•	Nutzdaten-Paketgröße: maximal 149 Byte; Einschränkung auf UTF-8-safe, JSON-kompatible Zeichen.
 	•	Chunking: Nachrichten werden in ~10-Byte Payload-Chunks segmentiert.
@@ -52,22 +53,25 @@ Das erlaubt gezielte Optimierung von n, k, und r.
 3) Stand der Forschung (ähnliche Systeme: DVB, DAB, LoRa):
 
 Vergleichbare Systeme
+
 	•	DVB-S2: Verwendet LDPC + BCH für FEC, mit sehr hohen Redundanzgraden in schlechten Kanälen.
 	•	DAB+ (Digital Audio Broadcast): Reed-Solomon auf Applikationsebene, Zeitdiversität.
 	•	LoRaWAN: Adaptive Data Rate, kleine Pakete, starke FEC mit Hamming/FEC(4,5).
 
-Lessons learned:
+Lessons learned
+
 	•	FEC + Interleaving + Fragmentierung sind zentrale Säulen.
 	•	Adaptive Kodierung je nach Kanalbedingungen verbessert Effizienz.
 	•	Selective Acknowledgements (SACK) sind essentiell für hohe Verlässlichkeit bei real-time reassembly.
 
-4) MeshCom:
+4) MeshCom
 
 Es ist wichtig hier zu betonen, dass wir auf das bestehde MeshCom Protokoll aufsetzen werden, das wiederum LoRaWAN als Unterbau hat. LoRaWan selbst bringt Fehlerkorrektur mit sich, sodass Kommunikation mit den aktuellen Kanal Parametern bis ca. SNR -17dB stattfinden kann. Es kommt trotzdem immer wieder zu Übertragungen, die verloregn gehen in einem Gruppen Chat, da die Übertragung nicht sichergestellt ist und wie oben dargestellt potentiell längere Nachrichten eine höhere Fehleranfälligkeit mit vollständigem Verlust habeb.
 
 5) Mögliche Zielarchitektur und Referenzimplementierung als Tech Demo und Feasability Study / Implementierung in Vue.js 3
 
 Client-Architekturvorschlag
+
 	•	Composables:
 	•	useChatStream() – verarbeitet Tippen → Chunking → Compression → FEC → Senden
 	•	usePacketReceiver() – sammelt Chunks, prüft Hashes, fordert ggf. Pakete neu an
@@ -86,12 +90,14 @@ Client-Architekturvorschlag
 
 6) Verdict, Diskussion und offene Punkte
 
-Stärken:
+Stärken
+
 	•	klar definierte und saubere Idee – mit exakte Grenzen für MeshCom Spec Payload (149 Byte, JSON-safe).
 	•	Echtzeit-fähig, robust und adaptiv - für hohe Kundenzufriedenheit
 	•	Praktische, realitätsnahe Annahmen (Fehlerraten, Broadcastmodell). Wissenschaftlich hinterlegt, basierend auf bekannten Modellen und Vorgehensweisen, keine sudo Science.
 
 Was noch fehlt / was noch definiert werden muss um die Idee tiefer zu legen
+
 	•	Chunk Size Tuning Algorithmus – optimal je nach Kanalgüte - für optimalen Kanaldurchsatz
 	•	Verlustmodell / Paket-Scheduling – Wiederholstrategie und Timeouts?
 	•	Buffer-Strategie bei Empfang – Wie lange wartet man auf fehlende Pakete? Ab wann reißt der Geduldsfaden
@@ -100,6 +106,7 @@ Was noch fehlt / was noch definiert werden muss um die Idee tiefer zu legen
 	•	Security? – MD5 ist schnell, aber angreifbar, trotzdem gut genug. Für Integrität okay, aber SHA-256 wäre besser, weil weniger Hash Kollisionen (wobei wir weiße IT sind und nicht bei der grünen IT arbeiten).
 
 Optionale Erweiterungen
+
 	•	Adaptive Redundanz: erhöhe FEC-Anteil bei hohem Paketverlust. 
 	•	Streaming Preview: Darstellung von “User is typing” + live Fragmentanzeige. Das wäre definitiv die coolste Sache.
 	•	UI-Feedback: grün = empfangen, gelb = erwartet, rot = verloren. Muss definitiv mit rein.
