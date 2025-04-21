@@ -1,9 +1,35 @@
 # McApp initial release with draft install guide server components and webapp directory
-McApp is a single page, client rendered web application. It should run on every browser out there, but you never know.
-Settings get stored in your browser. If you delete your browser cache, you need to setup the connection parameters again.
+McApp is a single page, client rendered web application. It should run on every browser out there, but you never know.  Settings get stored in your browser. If you delete your browser cache, you need to setup the connection parameters again.
 Everything is rendered on the client, the raspberry pi is only sending and receiving UDP LoRa and TCP web traffic.
-- No LightSQL, no PHP, just static web pages.
+- No LightSQL, no PHP, just static web pages
 - On initial page load, a memory dump from the UDP proxy gets sent to the browser. So every time you refresh your browser, you get a fresh reload.
+
+# McAdvChat - CI/CD Pipeline – Lightweight GitHub-Driven Deployment
+
+`McAdvChat` ist eine schlanke, browserbasierte Chat-App für Embedded Devices (z. B. Raspberry Pi), mit robustem Nachrichtenversand via LoRa, basierend auf APRS oder mit www Integration. Die WebApp wird automatisch gebaut, versioniert, als GitHub Release veröffentlicht – und kann remote auf Zielsystemen installiert werden, ganz ohne CI-Tools.
+
+---
+
+## 🚀 Release & Deployment Workflow
+
+Dieses Projekt verwendet ein minimalistisches, aber robustes Shell-basiertes Deployment-System:
+
+### 🧱 `release.sh` – Build & Publis (hidden, not public)
+
+Dieses Script:
+- baut die WebApp (`npm run build`)
+- tar-komprimiert den `/dist` Ordner
+- erstellt automatisch ein `release.json` mit Metadaten (Version, Datum)
+- generiert ein `CHANGELOG.md` aus den Dateiunterschieden seit dem letzten Release
+- erhöht automatisch die `Minor`-Version (`vX.Y.0`)
+- erstellt ein neues GitHub Release und lädt `dist.tar.gz` in öffentliche Repo hoch
+
+### ⚙️ `install.sh` – Remote Bootstrap Installer
+
+Dieses Script wird direkt auf einem Zielsystem (z. B. Raspberry Pi) ausgeführt:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-install.sh)
 
 # McApp Pflichtenheft 
 
@@ -37,6 +63,16 @@ Mein persönliches MashCom McApp-Projekt zerfällt in zwei Komponenten:
      - Karte muss Sat-View und Darkmode haben
      - Beim Klick auf einen Node wird mehr Info angezeigt
      - Nicht geplant: abrufen von dynamischen Daten zu Temperatur, Luftfeuchte und Luftdruck, sowie die weiteren Sensordaten
+
+  - FT - der File Transfer
+     - Ein File < 1kB kann in die Drop Zone gezogen werden und wird anschließend übertragen
+     - Via Gruppe 9 (HF Only)
+     - Empfänger wartet passiv auf übertragene Files
+     - Empfänger kann verloren gegangene Übertragungen erneut anfordern
+     - Übertragungskodierungmit Base91 Zeichensatz
+     - Blöcke werden Reed Solomon kodiert
+     - Vor Übertragung wird ein Header mit Meta-Information gesendet, damit klar ist, warum soviel Nachrichten kommen, die nicht menschenlesbar sind
+     - könnte auch Bilder übertragen, aber dazu reicht uns aktuell nicht die Bandbreite aus (8 Sekunden TX für 149 Bytes)
      
   - Setup Page 
      - Muss Gruppen und Nutzer filtern können
@@ -48,6 +84,7 @@ Mein persönliches MashCom McApp-Projekt zerfällt in zwei Komponenten:
     - Erhält über UDP alle Nachrichten vom MeshCom node (--extupip 192... und --extudp on nicht vergessen!)
     - Greift über BLE auf das Device zu, wenn gar nichts mehr geht
     	- Wird nicht über http auf das MeshCom Device zugreifen, weil wir BLE implementieren werden
+    - Kann Skripts und Webseite über bootstrap skript automatisch aktualisieren
       
 - Use Cases:
     - Chat
@@ -55,10 +92,9 @@ Mein persönliches MashCom McApp-Projekt zerfällt in zwei Komponenten:
         - Look and Feel gemäß aktueller ChatApps, damit die Bedienung einfach ist
     - Map
         - Alle empfangenen POS Meldungen auf ein Karte mit verschiednenen Darstellungsoptionen anzeigen
+    - File Transfer
+        - Kann keine Textdokumente übertragen 
     - Konfigurationsseite: die Config Seite muss entsprechend aktueller Design Guide Lines gestaltet werden
-      
-
-
 
 - Optional: mehrere Nodes über UDP und http anbinden
 
