@@ -15,7 +15,7 @@ UDP_TARGET = ("dk5en-99.local", UDP_PORT_send)
 #UDP_TARGET = ("44.149.17.56", UDP_PORT_send)
 WS_HOST = "0.0.0.0"
 WS_PORT = 2980
-VERSION="v0.2.0"
+VERSION="v0.3.0"
 
 #7x24 = 168h
 PRUNE_HOURS = 168  # Nachrichten, die älter sind als diese Anzahl Stunden, werden entfernt
@@ -201,6 +201,7 @@ async def main():
         while True:
             line = sys.stdin.readline()
             if not line:
+                time.sleep(1)
                 continue
             if line.strip() == "q":
                 loop.call_soon_threadsafe(stop_event.set)
