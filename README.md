@@ -29,7 +29,7 @@ Dieses Script:
 Dieses Script wird direkt auf einem Zielsystem (z. B. Raspberry Pi) ausgeführt:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-install.sh)
+curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-install.sh | sudo bash
 
 # McApp Pflichtenheft 
 
@@ -106,6 +106,7 @@ Was noch fehlt:
 - Projekt sollte sich auf einer neuen SD-Karte selbst Bootstrappen mit einem Shellscript
 	- Darauf wird derzeit verzichtet, denn es werden Nutzer-Probleme mit den SSL-Zertifikaten erwartet.
  	- Es gibt leider keinen einfachen und sauberen Weg gibt mit den SSL-Zertifikaten im Heimnetzwerk.
+- mc-screen.sh wrapper skript durch service ersetzen, das sich über systemctl steuern lässt
 
 
 # Ausblick / Vision: McAdvChat - der "MeshCom Advanced Chat"
