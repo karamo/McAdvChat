@@ -110,4 +110,42 @@ echo "✅ Caddyfile written successfully."
 echo "🔁 Restarting Caddy..."
 sudo systemctl restart caddy
 
+echo "🚀 enabling Caddy for startup..."
+sudo systemctl enable --now caddy
+
+CADDY_ROOT_CRT="root.crt"
+CADDY_ATHORITY="/var/lib/caddy/.local/share/caddy/pki/authorities/local"
+DST_DIR="/var/www/html"
+
+echo "🔐 provisioning root.crt in html root folder ..."
+if [ ! -f "$DST_DIR/$CADDY_ROOT_CRT" ]; then
+  sudo cp $CADDY_ATHORITY/$CADDY_ROOT_CRT  $DST_DIR
+  sudo chmod a+r $DST_DIR/$CADDY_ROOT_CRT 
+fi
+
+
+lighttps="/etc/ligttpd/lighttpd.conf"
+rewrite_marker='^/webapp/'
+
+echo "🔍 Checking if $rewrite_marker rewrite rule is present in $lighttpd_conf..."
+
+if grep -q "$rewrite_marker" "$lighttpd_conf"; then
+  echo "✅ Rewrite rule for /webapp/ already present. Skipping patch."
+else
+  echo "🛠️ Patching $lighttpd_conf with /webapp/ rewrite rule..."
+
+  sudo tee -a "$lighttpd_conf" > /dev/null <<EOF
+
+# McAdvChat Patch: SPA rewrite for /webapp/
+\$HTTP["url"] =~ "^/webapp/" {
+  url.rewrite-if-not-file = (
+    "^/webapp/(.*)" => "/webapp/index.html"
+  )
+}
+EOF
+
+  echo "✅ Patch applied to $lighttpd_conf"
+fi
+
+
 echo "🎉 Installation complete."
