@@ -15,7 +15,7 @@ UDP_TARGET = ("dk5en-99.local", UDP_PORT_send)
 #UDP_TARGET = ("44.149.17.56", UDP_PORT_send)
 WS_HOST = "0.0.0.0"
 WS_PORT = 2980
-VERSION=v0.1.0
+VERSION="v0.1.0"
 
 #7x24 = 168h
 PRUNE_HOURS = 168  # Nachrichten, die älter sind als diese Anzahl Stunden, werden entfernt

@@ -5,7 +5,7 @@ DIR="MC"
 SCREEN_NAME="mcproxy"
 VENV_ACTIVATE="MyEnv/bin/activate"
 PYTHON_SCRIPT="C2-mc-ws.py"
-VERSION=v0.1.0
+VERSION="v0.1.0"
 
 # Ins Verzeichnis wechseln
 cd "$DIR" || { echo "Fehler: Verzeichnis $DIR nicht gefunden."; exit 1; }
