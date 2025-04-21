@@ -190,9 +190,6 @@ async def main():
     ws_server = await websockets.serve(websocket_handler, WS_HOST, WS_PORT)
     udp_task = asyncio.create_task(udp_listener())
 
-    print(f"WebSocket-Server läuft auf ws://{WS_HOST}:{WS_PORT}")
-    print(f"UDP-Proxy läuft auf Port {UDP_PORT_list}, Weiterleitung an {UDP_TARGET}")
-    print("Drücke 'q' + Enter zum Beenden und Speichern")
 
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
@@ -207,12 +204,28 @@ async def main():
                 loop.call_soon_threadsafe(stop_event.set)
                 break
 
+    # 🛡️ Signal-Handler (SIGINT = Ctrl+C, SIGTERM = systemctl stop)
+    def handle_shutdown():
+       print("Signal empfangen, beende Dienst ...")
+       loop.call_soon_threadsafe(stop_event.set)
+
+    # ✅ Signal-Handler registrieren
+    for sig in (signal.SIGINT, signal.SIGTERM):
+       loop.add_signal_handler(sig, handle_shutdown)
+
+    # 🖥️ Nur wenn interaktives Terminal vorhanden, stdin überwachen
     if sys.stdin.isatty():
+       print("Drücke 'q' + Enter zum Beenden und Speichern")
        loop.run_in_executor(None, stdin_reader)
     else:
        print("Kein Terminal erkannt – Eingabe von 'q' deaktiviert")
 
+    print(f"WebSocket-Server läuft auf ws://{WS_HOST}:{WS_PORT}")
+    print(f"UDP-Proxy läuft auf Port {UDP_PORT_list}, Weiterleitung an {UDP_TARGET}")
+
     await stop_event.wait()
+
+    print("Beende Server, speichere Daten …")
 
     with open(store_file_name, "w", encoding="utf-8") as f:
         json.dump(list(message_store), f, ensure_ascii=False, indent=2)
@@ -220,7 +233,6 @@ async def main():
 
     udp_task.cancel()
     print("nach cancel.")
-    #ws_server.close(udp_task, return_exception=True)
     ws_server.close()
 
     print("warten auf close.")
