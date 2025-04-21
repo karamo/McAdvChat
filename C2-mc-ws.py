@@ -207,7 +207,11 @@ async def main():
                 loop.call_soon_threadsafe(stop_event.set)
                 break
 
-    loop.run_in_executor(None, stdin_reader)
+    if sys.stdin.isatty():
+       loop.run_in_executor(None, stdin_reader)
+    else:
+       print("Kein Terminal erkannt – Eingabe von 'q' deaktiviert")
+
     await stop_event.wait()
 
     with open(store_file_name, "w", encoding="utf-8") as f:
