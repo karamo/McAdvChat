@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Konfiguration
-DIR="MC"
+DIR=""
 SCREEN_NAME="mcproxy"
-VENV_ACTIVATE="MyEnv/bin/activate"
+VENV_ACTIVATE="venv/bin/activate"
 PYTHON_SCRIPT="C2-mc-ws.py"
 VERSION="v0.1.0"
 
@@ -16,7 +16,7 @@ if screen -list | grep -q "$SCREEN_NAME"; then
 fi
 
 # Neue detached Screen-Session starten
-screen -dmS "$SCREEN_NAME" bash -c "source $VENV_ACTIVATE && python3 $PYTHON_SCRIPT"
+screen -dmS "$SCREEN_NAME" bash -c "source $VENV_ACTIVATE && python3 /usr/local/bin/$PYTHON_SCRIPT"
 
 # Kurze Pause, damit Prozess startet
 sleep 1
