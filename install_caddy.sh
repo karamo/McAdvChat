@@ -1,4 +1,3 @@
-
 #!/bin/bash
 set -euo pipefail
 
@@ -124,8 +123,8 @@ if [ ! -f "$DST_DIR/$CADDY_ROOT_CRT" ]; then
 fi
 
 
-lighttps="/etc/ligttpd/lighttpd.conf"
-rewrite_marker='^/webapp/'
+lighttpd_conf="/etc/lighttpd/lighttpd.conf"
+rewrite_marker='/webapp/index.html'
 
 echo "🔍 Checking if $rewrite_marker rewrite rule is present in $lighttpd_conf..."
 
@@ -145,6 +144,8 @@ else
 EOF
 
   echo "✅ Patch applied to $lighttpd_conf"
+  echo "🔁 Restarting lighttpd..."
+  sudo systemctl restart lighttpd
 fi
 
 
