@@ -15,7 +15,7 @@ UDP_TARGET = ("dk5en-99.local", UDP_PORT_send)
 #UDP_TARGET = ("44.149.17.56", UDP_PORT_send)
 WS_HOST = "0.0.0.0"
 WS_PORT = 2980
-VERSION="v0.3.0"
+VERSION="v0.4.0"
 
 #7x24 = 168h
 PRUNE_HOURS = 168  # Nachrichten, die älter sind als diese Anzahl Stunden, werden entfernt
@@ -25,6 +25,8 @@ clients = set()
 message_store = deque()
 message_store_size = 0
 store_file_name = "mcdump.json"
+
+has_console = sys.stdout.isatty()
 
 def get_current_timestamp() -> str:
     return datetime.utcnow().isoformat()
@@ -61,10 +63,12 @@ async def udp_listener():
 
         if isinstance(message, dict) and isinstance(message.get("msg"), str):
             if message["msg"].startswith("{CET}"):
-                print(f"{readabel} {message['src_type']} von {addr} Zeit: {message['msg']} ID:{message['msg_id']} src:{message['src']}")
+                if has_console:
+                   print(f"{readabel} {message['src_type']} von {addr} Zeit: {message['msg']} ID:{message['msg_id']} src:{message['src']}")
             else:
-                print(f"{readabel} {message['src_type']} von {addr}: {message}")
                 store_message(message, json.dumps(message)) #wir wollen mit Timestamp speichern
+                if has_console:
+                   print(f"{readabel} {message['src_type']} von {addr}: {message}")
 
         if clients:
             await asyncio.gather(*[client.send(json.dumps(message)) for client in clients])
@@ -81,12 +85,13 @@ async def websocket_handler(websocket):
         async for message in websocket:
             try:
                 data = json.loads(message)
-                print(f"WebSocket empfangen: {data}")
+                if has_console:
+                   print(f"WebSocket empfangen: {data}")
                 if data.get("type") == "command":
-                    await handle_command(data.get("msg"), websocket)
+                   await handle_command(data.get("msg"), websocket)
                 else:
-                    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    udp_sock.sendto(json.dumps(data).encode("utf-8"), UDP_TARGET)
+                   udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                   udp_sock.sendto(json.dumps(data).encode("utf-8"), UDP_TARGET)
             except json.JSONDecodeError:
                 print(f"Fehler: Ungültiges JSON über WebSocket empfangen: {message}")
     except websockets.exceptions.ConnectionClosed as e:

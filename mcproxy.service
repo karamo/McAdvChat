@@ -1,0 +1,17 @@
+[Unit]
+Description=McAdvances MeshCom Proxy Service
+After=network.target
+
+[Service]
+Type=simple
+User=martin
+WorkingDirectory=/home/martin
+ExecStart=/bin/bash -c 'source /home/martin/venv/bin/activate && exec python3 /usr/local/bin/C2-mc-ws.py'
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
