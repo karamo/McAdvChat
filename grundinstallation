@@ -1,0 +1,12 @@
+cp mcproxy.service /etc/systemd/system/mcproxy.service
+
+journalctl -u mcproxy.service -f
+
+sudo systemctl daemon-reexec
+sudo systemctl daemon-reload
+sudo systemctl enable mcproxy.service
+sudo systemctl start mcproxy.service
+
+
+sudo systemctl stop  mcproxy.service
+sudo systemctl start  mcproxy.service
