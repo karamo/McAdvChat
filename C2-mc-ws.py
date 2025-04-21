@@ -1,3 +1,4 @@
+#VERSION=v0.1.0
 import asyncio
 import json
 import websockets
@@ -11,8 +12,8 @@ from collections import deque
 
 UDP_PORT_send = 1799
 UDP_PORT_list = 1799
-#UDP_TARGET = ("dk5en-99.local", UDP_PORT_send)
-UDP_TARGET = ("44.149.17.56", UDP_PORT_send)
+UDP_TARGET = ("dk5en-99.local", UDP_PORT_send)
+#UDP_TARGET = ("44.149.17.56", UDP_PORT_send)
 WS_HOST = "0.0.0.0"
 WS_PORT = 2980
 
