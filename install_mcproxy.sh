@@ -7,6 +7,8 @@ HOME_DIR=$(eval echo "~$USER_NAME")
 VENV_DIR="$HOME_DIR/venv"
 PY_SCRIPT="/usr/local/bin/C2-mc-ws.py"
 SERVICE_FILE="/etc/systemd/system/mcproxy.service"
+CONFIG_DIR="/etc/mcadvchat"
+CONFIG_FILE="config.json"
 
 echo "Using user: $USER_NAME"
 echo "Home directory: $HOME_DIR"
@@ -29,6 +31,30 @@ pip install -q websockets
 if [ ! -f "$PY_SCRIPT" ]; then
   echo "❌ ERROR: Proxy script not found at $PY_SCRIPT"
   exit 1
+fi
+
+echo "check, if config directory is there .."
+if [ ! -f "$CONFIG_DIR" ]; then
+  echo "Creating configuration directory $CONFIG_DIR"
+  mkdir $CONFIG_DIR
+fi 
+
+echo "check, if config file is there .."
+if [ ! -f "$CONFIG_FILE" ]; then
+  echo "Creating dummy configutation $CONFIG_DIR/$CONFIG_FILE"
+  sudo tee "$CONFIG_DIR/$CONFIG_FILE" > /dev/null <<EOF
+{
+  "UDP_PORT_list": 1799,
+  "UDP_PORT_send": 1799,
+  "UDP_TARGET": "DK0XXX-99.local",
+  "WS_HOST": "127.0.0.1",
+  "WS_PORT": 2980,
+  "PRUNE_HOURS": 168,
+  "MAX_STORAGE_SIZE_MB": 10,
+  "STORE_FILE_NAME": "$HOME_DIR/mcdump.json",
+  "VERSION": "v0.0.0"
+}
+EOF
 fi
 
 # 4. Check and create systemd service
