@@ -1,8 +1,9 @@
 
+curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash
+
 curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-install.sh | bash
 
 
-curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash
 
 journalctl -u mcproxy.service -f
 

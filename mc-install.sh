@@ -38,6 +38,12 @@ fi
 REAL_USER="${SUDO_USER:-$USER}"
 log "Skript läuft unter Benutzer: $REAL_USER"
 
+# Prüfen, ob echter Benutzer root ist
+if [ "$REAL_USER" = "root" ]; then
+  error "❌Fehler: Dieses Skript darf nicht als root ausgeführt werden!"
+  exit 1
+fi
+
 # --- State-Datei vorbereiten ---
 if [[ ! -f "$STATE_FILE" ]]; then
   log "State-Datei nicht gefunden. Erzeuge neue Datei."
@@ -159,5 +165,13 @@ jq -n --arg wa "$WEBAPP_REMOTE_VERSION" \
       '{webapp: $wa, python: $py, shell: $sh, installer: $inst}' > "$STATE_FILE"
 
 log "Installations-Skript erfolgreich abgeschlossen."
+
+
+#Now run the post installer
+if version_gt "$PY_REMOTE_VERSION" "$PY_LOCAL_VERSION"; then
+  log "🚀launchig server component Script post installer .."
+  curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash
+fi
+
 exit 0
 

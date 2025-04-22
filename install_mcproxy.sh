@@ -1,9 +1,31 @@
 #!/bin/bash
 set -euo pipefail
 
+
+# --- Sudo-Handling ---
+if [[ $EUID -ne 0 ]]; then
+  if sudo -n true 2>/dev/null; then
+    exec sudo "$0" "$@"
+  else
+    echo "🔐 Root-Rechte erforderlich. Bitte Passwort eingeben:"
+    exec sudo -k bash "$0" "$@"
+  fi
+fi
+
+# --- User-Erkennung ---
+REAL_USER="${SUDO_USER:-$USER}"
+log "Skript läuft unter Benutzer: $REAL_USER"
+
+# Prüfen, ob echter Benutzer root ist
+if [ "$REAL_USER" = "root" ]; then
+  error "❌Fehler: Dieses Skript darf nicht als root ausgeführt werden!"
+  exit 1
+fi
+
 # Determine the user and home
 USER_NAME=$(whoami)
 HOME_DIR=$(eval echo "~$USER_NAME")
+
 VENV_DIR="$HOME_DIR/venv"
 PY_SCRIPT="/usr/local/bin/C2-mc-ws.py"
 SERVICE_FILE="/etc/systemd/system/mcproxy.service"
@@ -56,6 +78,8 @@ if [ ! -f "$CONFIG_DIR/$CONFIG_FILE" ]; then
 }
 EOF
   echo "now edit your $CONFIG_DIR/$CONFIG_FILE to your environmemt"
+  echo "and then execute: "
+  echo "curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash"
   exit 0
 fi
 
@@ -63,6 +87,8 @@ REQUIRED_TARGET="DK0XXX-99.local"
 
 if jq -e --arg tgt "$REQUIRED_TARGET" '.UDP_TARGET == $tgt' "$CONFIG_DIR/$CONFIG_FILE" > /dev/null; then
   echo "❌Error: valid parameters missing in $CONFIG_FILE"
+  echo "📝 edit your config parameter and come back .."
+  echo "curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash"
   exit 1
 fi
 

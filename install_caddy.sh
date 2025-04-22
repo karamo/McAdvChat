@@ -3,6 +3,27 @@ set -euo pipefail
 
 echo "🔧 Starting Caddy + Lighttpd installer..."
 
+# --- Sudo-Handling ---
+if [[ $EUID -ne 0 ]]; then
+  if sudo -n true 2>/dev/null; then
+    exec sudo "$0" "$@"
+  else
+    echo "🔐 Root-Rechte erforderlich. Bitte Passwort eingeben:"
+    exec sudo -k bash "$0" "$@"
+  fi
+fi
+
+# --- User-Erkennung ---
+REAL_USER="${SUDO_USER:-$USER}"
+log "Skript läuft unter Benutzer: $REAL_USER"
+
+# Prüfen, ob echter Benutzer root ist
+if [ "$REAL_USER" = "root" ]; then
+  error "❌Fehler: Dieses Skript darf nicht als root ausgeführt werden!"
+  exit 1
+fi
+
+
 # 1. Check architecture
 ARCH=$(uname -m)
 echo "📦 Detected architecture: $ARCH"
@@ -122,6 +143,14 @@ if [ ! -f "$DST_DIR/$CADDY_ROOT_CRT" ]; then
   sudo chmod a+r $DST_DIR/$CADDY_ROOT_CRT 
 fi
 
+echo "🔐 checking if root.crt in local cert store folder ..."
+if [ ! -f "/etc/ssl/certs/Caddy_10y_Root.crt" ]; then
+  echo "🚀installing caddy root certificate in local certificate store"
+  sudo ln -s /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt /etc/ssl/certs/Caddy_10y_Root.crt
+  echo "🔁rehashing ca certificates .."
+  sudo update-ca-certificates
+fi 
+
 
 lighttpd_conf="/etc/lighttpd/lighttpd.conf"
 rewrite_marker='/webapp/index.html'
@@ -147,9 +176,6 @@ EOF
   echo "🔁 Restarting lighttpd..."
   sudo systemctl restart lighttpd
 fi
-
-ln -s /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt Caddy_10y_Root.crt
-update-ca-certificates
 
 
 echo "🎉 Installation complete."
