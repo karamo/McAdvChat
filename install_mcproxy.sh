@@ -1,7 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-
 # --- Sudo-Handling ---
 if [[ $EUID -ne 0 ]]; then
   if sudo -n true 2>/dev/null; then
@@ -14,11 +13,11 @@ fi
 
 # --- User-Erkennung ---
 REAL_USER="${SUDO_USER:-$USER}"
-log "Skript läuft unter Benutzer: $REAL_USER"
+echo "Skript läuft unter Benutzer: $REAL_USER"
 
 # Prüfen, ob echter Benutzer root ist
 if [ "$REAL_USER" = "root" ]; then
-  error "❌Fehler: Dieses Skript darf nicht als root ausgeführt werden!"
+  echo "❌Fehler: Dieses Skript darf nicht als root ausgeführt werden!"
   exit 1
 fi
 
