@@ -171,7 +171,7 @@ log "Installations-Skript erfolgreich abgeschlossen."
 #Now run the post installer
 if version_gt "$PY_REMOTE_VERSION" "$PY_LOCAL_VERSION"; then
   log "🚀launchig server component Script post installer .."
-  curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | sudo bash
 fi
 
 exit 0
