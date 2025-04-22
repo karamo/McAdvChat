@@ -22,7 +22,8 @@ if [ "$REAL_USER" = "root" ]; then
 fi
 
 # Determine the user and home
-USER_NAME=$(whoami)
+#USER_NAME=$(whoami)
+USER_NAME=$REAL_USER
 HOME_DIR=$(eval echo "~$USER_NAME")
 
 VENV_DIR="$HOME_DIR/venv"
