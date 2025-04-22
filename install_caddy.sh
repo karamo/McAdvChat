@@ -3,6 +3,7 @@ set -euo pipefail
 
 echo "🔧 Starting Caddy + Lighttpd installer..."
 
+
 # --- Sudo-Handling ---
 if [[ $EUID -ne 0 ]]; then
   if sudo -n true 2>/dev/null; then
@@ -31,6 +32,37 @@ if [[ "$ARCH" != "aarch64" ]]; then
   echo "❌ Unsupported architecture: $ARCH (expected aarch64)"
   exit 1
 fi
+
+LOCALE_TO_USE="de_DE.UTF-8 UTF-8"
+LANG_KEY="de_DE.UTF-8"
+
+echo ">>> Installing required locales..."
+
+# Add desired locale if not already in /etc/locale.gen
+if ! grep -q "^$LOCALE_TO_USE" /etc/locale.gen; then
+  echo "$LOCALE_TO_USE" | sudo tee -a /etc/locale.gen
+fi
+
+# Optionally remove en_GB.UTF-8 to avoid fallback conflicts
+sudo sed -i 's/^en_GB.UTF-8 UTF-8/# en_GB.UTF-8 UTF-8/' /etc/locale.gen
+
+# Generate only the selected locales
+sudo locale-gen
+
+# Write environment config
+echo ">>> Setting system-wide locale to $LANG_KEY"
+sudo bash -c "cat > /etc/default/locale" <<EOF
+LANG=$LANG_KEY
+LC_ALL=$LANG_KEY
+EOF
+
+# Optional: also update current session
+export LANG=$LANG_KEY
+export LC_ALL=$LANG_KEY
+
+echo ">>> Locale setup complete. Current locale:"
+locale
+
 
 # 2. Update APT and install required packages
 echo "📦 Updating package lists..."
