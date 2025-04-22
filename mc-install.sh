@@ -2,6 +2,11 @@
 set -euo pipefail
 #set -euox pipefail #debug
 
+# --- Logging ---
+log() { echo -e "[\033[1;32mINFO\033[0m] $1"; }
+warn() { echo -e "[\033[1;33mWARN\033[0m] $1"; }
+error() { echo -e "[\033[1;31mERROR\033[0m] $1" >&2; exit 1; }
+
 #https://github.com/settings/tokens
 #“Generate new token (classic)”
 #nur public_repo
@@ -19,10 +24,6 @@ PY_FILE="/usr/local/bin/C2-mc-ws.py"
 SH_FILE="/usr/local/bin/mc-screen.sh"
 SCRIPT_VERSION="v0.1.0"
 
-# --- Logging ---
-log() { echo -e "[\033[1;32mINFO\033[0m] $1"; }
-warn() { echo -e "[\033[1;33mWARN\033[0m] $1"; }
-error() { echo -e "[\033[1;31mERROR\033[0m] $1" >&2; exit 1; }
 
 # --- Sudo-Handling ---
 if [[ $EUID -ne 0 ]]; then
