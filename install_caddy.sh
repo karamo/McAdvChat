@@ -16,7 +16,7 @@ echo "📦 Updating package lists..."
 sudo apt update
 
 echo "📥 Installing base dependencies..."
-sudo apt install -y debian-keyring debian-archive-keyring curl apt-transport-https
+sudo apt install -y debian-keyring debian-archive-keyring curl apt-transport-https jq
 
 # 3. Add Caddy GPG key if missing
 CADDY_KEYRING="/usr/share/keyrings/caddy-stable-archive-keyring.gpg"
@@ -147,6 +147,9 @@ EOF
   echo "🔁 Restarting lighttpd..."
   sudo systemctl restart lighttpd
 fi
+
+ln -s /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt Caddy_10y_Root.crt
+update-ca-certificates
 
 
 echo "🎉 Installation complete."

@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timedelta
 from collections import deque
 
-VERSION="v0.5.0"
+VERSION="v0.6.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 
 clients = set()
@@ -160,7 +160,7 @@ def prune_messages():
     message_store.clear()
     message_store.extend(temp_store)
     message_store_size = new_size
-    print(f"Nach Message clean {len(message_store)} Nachrichten")
+    #print(f"Nach Message clean {len(message_store)} Nachrichten")
 
 def load_dump():
     global message_store, message_store_size
@@ -169,7 +169,7 @@ def load_dump():
             loaded = json.load(f)
             message_store = deque(loaded)
             message_store_size = sum(len(json.dumps(m).encode("utf-8")) for m in message_store)
-            print(f"Dump geladen: {len(message_store)} Nachrichten ({message_store_size / 1024:.2f} KB)")
+            print(f"{len(message_store)} Nachrichten ({message_store_size / 1024:.2f} KB) geladen")
 
 # UTF-8 Fixer
 def strip_invalid_utf8(data: bytes) -> str:
@@ -234,11 +234,11 @@ async def main():
     if sys.stdin.isatty():
        print("Drücke 'q' + Enter zum Beenden und Speichern")
        loop.run_in_executor(None, stdin_reader)
-    else:
-       print("Kein Terminal erkannt – Eingabe von 'q' deaktiviert")
+    #else:
+    #   print("Kein Terminal erkannt – Eingabe von 'q' deaktiviert")
 
-    print(f"WebSocket-Server läuft auf ws://{WS_HOST}:{WS_PORT}")
-    print(f"UDP-Proxy läuft auf Port {UDP_PORT_list}, Weiterleitung an {UDP_TARGET}")
+    print(f"WebSocket ws://{WS_HOST}:{WS_PORT}")
+    print(f"UDP-Proxy {UDP_PORT_list}, MeshCom {UDP_TARGET}")
 
     await stop_event.wait()
 
