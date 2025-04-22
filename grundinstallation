@@ -1,14 +1,10 @@
-cp mcproxy.service /etc/systemd/system/mcproxy.service
 
-curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-install.sh | bash
+
+
+curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash
 
 journalctl -u mcproxy.service -f
-
-sudo systemctl daemon-reexec
-sudo systemctl daemon-reload
-sudo systemctl enable mcproxy.service
-sudo systemctl start mcproxy.service
-
 
 sudo systemctl stop  mcproxy.service
 sudo systemctl start  mcproxy.service
