@@ -25,7 +25,7 @@ SH_FILE="/usr/local/bin/mc-screen.sh"
 SCRIPT_VERSION="v0.1.0"
 
 
- --- Sudo-Handling ---
+# --- Sudo-Handling ---
 if [[ $EUID -ne 0 ]]; then
   if sudo -n true 2>/dev/null; then
     exec sudo "$0" "$@"
