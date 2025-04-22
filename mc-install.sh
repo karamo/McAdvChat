@@ -26,14 +26,14 @@ SCRIPT_VERSION="v0.1.0"
 
 
 # --- Sudo-Handling ---
-if [[ $EUID -ne 0 ]]; then
-  if sudo -n true 2>/dev/null; then
-    exec sudo "$0" "$@"
-  else
-    echo "🔐 Root-Rechte erforderlich. Bitte Passwort eingeben:"
-    exec sudo -k bash "$0" "$@"
-  fi
-fi
+#if [[ $EUID -ne 0 ]]; then
+#  if sudo -n true 2>/dev/null; then
+#    exec sudo "$0" "$@"
+#  else
+#    echo "🔐 Root-Rechte erforderlich. Bitte Passwort eingeben:"
+#    exec sudo -k bash "$0" "$@"
+#  fi
+#fi
 
 # --- User-Erkennung ---
 REAL_USER="${SUDO_USER:-$USER}"
