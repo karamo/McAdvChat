@@ -181,9 +181,6 @@ DST_DIR="/var/www/html"
 echo "🔐 provisioning root.crt in html root folder ..."
 if [ ! -f "$DST_DIR/$CADDY_ROOT_CRT" ]; then
   sudo cp $CADDY_ATHORITY/$CADDY_ROOT_CRT  $DST_DIR
-  echo "sudo chmod a+r $DST_DIR/$CADDY_ROOT_CRT"
-  set -x
-  echo " we want '$DST_DIR/$CADDY_ROOT_CRT' "
   sudo chmod a+r $DST_DIR/$CADDY_ROOT_CRT
 fi
 
