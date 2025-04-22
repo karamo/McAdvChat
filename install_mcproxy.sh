@@ -126,5 +126,5 @@ sudo systemctl enable mcproxy.service
 sudo systemctl restart mcproxy.service
 
 echo "✅Service 'mcproxy' successfully installed and started."
-echo "now go to your webbrowser: https://mcapp.local/webap"
-echo "go to settings page and make sure to put in mcapp.local"
+echo "now go to your webbrowser, import the root certificate"
+echo "go to settings page and make sure to put in $hostname either .local or what every domain you use"

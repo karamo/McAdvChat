@@ -2,7 +2,7 @@
 curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_caddy.sh | bash
 
 2) With the basesetup install all McAdvChat App Components
-curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-install.sh | sudo bash
 
 3) On a fresh system the server component needs to be configured
 curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash
