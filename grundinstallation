@@ -1,11 +1,23 @@
+1) With a fresh SD Card, bootstrap all system components
+curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_caddy.sh | bash
 
-curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash
-
+2) With the basesetup install all McAdvChat App Components
 curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-install.sh | bash
 
+3) On a fresh system the server component needs to be configured
+curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash
 
+Script will stop, now edit the config file and put in the IP Address or DNS name of your MeshCom Node
+sudo vi /etc/mcadvchat/config.json
 
-journalctl -u mcproxy.service -f
+Either UDP_TARGET can be reached via mDNS, then it's your Call-Sign and SID with Domian .local
+Or you just enter the IP-Address, e.g.
+"UDP_TARGET": "192.168.1.74",
 
-sudo systemctl stop  mcproxy.service
-sudo systemctl start  mcproxy.service
+save and exit, and restart the script that installs the service
+curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash
+
+4) later you can 
+  journalctl -u mcproxy.service -f
+  sudo systemctl stop  mcproxy.service
+  sudo systemctl start  mcproxy.service

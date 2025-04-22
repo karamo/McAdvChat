@@ -77,8 +77,8 @@ if [ ! -f "$CONFIG_DIR/$CONFIG_FILE" ]; then
   "VERSION": "v0.0.0"
 }
 EOF
-  echo "now edit your $CONFIG_DIR/$CONFIG_FILE to your environmemt"
-  echo "and then execute: "
+  echo "now:    sudo vi $CONFIG_DIR/$CONFIG_FILE"
+  echo "and then execute again to finish installation: "
   echo "curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash"
   exit 0
 fi

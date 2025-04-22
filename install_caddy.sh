@@ -116,6 +116,7 @@ else
   echo "✅ Caddy version: $CADDY_VERSION"
 fi
 
+
 # 7. Determine hostname and domain
 HOSTNAME=$(hostname -s)
 DOMAIN=$(dnsdomainname 2>/dev/null)
@@ -201,6 +202,8 @@ echo "🔍 Checking if $rewrite_marker rewrite rule is present in $lighttpd_conf
 if grep -q "$rewrite_marker" "$lighttpd_conf"; then
   echo "✅ Rewrite rule for /webapp/ already present. Skipping patch."
 else
+  echo "enabling rewrite rule for lighttpd"
+  sudo lighty-enable-mod rewrite
   echo "🛠️ Patching $lighttpd_conf with /webapp/ rewrite rule..."
 
   sudo tee -a "$lighttpd_conf" > /dev/null <<EOF
@@ -218,5 +221,6 @@ EOF
   sudo systemctl restart lighttpd
 fi
 
-
-echo "🎉 Installation complete."
+echo "🎉 Base Install of System Components complete."
+echo "now execute:"
+echo "curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-install.sh | sudo bash"
