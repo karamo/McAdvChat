@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euox pipefail
+set -euo pipefail
 
 #supress warnings "setlocale: LC_ALL: cannot change locale (de_DE.UTF-8)"
 export LC_ALL=C
@@ -36,36 +36,41 @@ if [[ "$ARCH" != "aarch64" ]]; then
   exit 1
 fi
 
-LOCALE_TO_USE="de_DE.UTF-8 UTF-8"
-LANG_KEY="de_DE.UTF-8"
 
-echo ">>> Installing required locales..."
+if locale -a | grep -q '^de_DE\.utf8$'; then
+  echo "Locale de_DE.UTF-8 is already generated."
+else
 
-# Add desired locale if not already in /etc/locale.gen
-if ! grep -q "^$LOCALE_TO_USE" /etc/locale.gen; then
-  echo "$LOCALE_TO_USE" | sudo tee -a /etc/locale.gen
-fi
+  echo ">>> Installing required locales..."
+  LOCALE_TO_USE="de_DE.UTF-8 UTF-8"
+  LANG_KEY="de_DE.UTF-8"
 
-# Optionally remove en_GB.UTF-8 to avoid fallback conflicts
-sudo sed -i 's/^en_GB.UTF-8 UTF-8/# en_GB.UTF-8 UTF-8/' /etc/locale.gen
+  # Add desired locale if not already in /etc/locale.gen
+  if ! grep -q "^$LOCALE_TO_USE" /etc/locale.gen; then
+    echo "$LOCALE_TO_USE" | sudo tee -a /etc/locale.gen
+  fi
 
-# Generate only the selected locales
-sudo locale-gen
+  # remove en_GB.UTF-8 to avoid fallback conflicts
+  sudo sed -i 's/^en_GB.UTF-8 UTF-8/# en_GB.UTF-8 UTF-8/' /etc/locale.gen
 
-# Write environment config
-echo ">>> Setting system-wide locale to $LANG_KEY"
-sudo bash -c "cat > /etc/default/locale" <<EOF
+  # Generate only the selected locales
+  sudo locale-gen
+
+  # Write environment config
+  echo ">>> Setting system-wide locale to $LANG_KEY"
+  sudo bash -c "cat > /etc/default/locale" <<EOF
 LANG=$LANG_KEY
 LC_ALL=$LANG_KEY
 EOF
 
-# Optional: also update current session
-export LANG=$LANG_KEY
-export LC_ALL=$LANG_KEY
+  # Optional: also update current session
+  export LANG=$LANG_KEY
+  export LC_ALL=$LANG_KEY
 
-echo ">>> Locale setup complete. Current locale:"
-locale
-
+  echo ">>> Locale setup complete "
+  #echo ">>> Locale setup complete. Current locale:"
+  #locale
+fi
 
 # 2. Update APT and install required packages
 echo "📦 Updating package lists..."
@@ -176,7 +181,10 @@ DST_DIR="/var/www/html"
 echo "🔐 provisioning root.crt in html root folder ..."
 if [ ! -f "$DST_DIR/$CADDY_ROOT_CRT" ]; then
   sudo cp $CADDY_ATHORITY/$CADDY_ROOT_CRT  $DST_DIR
-  sudo chmod a+r $DST_DIR/$CADDY_ROOT_CRT 
+  echo "sudo chmod a+r $DST_DIR/$CADDY_ROOT_CRT"
+  set -x
+  echo " we want '$DST_DIR/$CADDY_ROOT_CRT' "
+  sudo chmod a+r $DST_DIR/$CADDY_ROOT_CRT
 fi
 
 echo "🔐 checking if root.crt in local cert store folder ..."
