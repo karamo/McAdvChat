@@ -25,15 +25,15 @@ SH_FILE="/usr/local/bin/mc-screen.sh"
 SCRIPT_VERSION="v0.1.0"
 
 
-# --- Sudo-Handling ---
-#if [[ $EUID -ne 0 ]]; then
-#  if sudo -n true 2>/dev/null; then
-#    exec sudo "$0" "$@"
-#  else
-#    echo "🔐 Root-Rechte erforderlich. Bitte Passwort eingeben:"
-#    exec sudo -k bash "$0" "$@"
-#  fi
-#fi
+ --- Sudo-Handling ---
+if [[ $EUID -ne 0 ]]; then
+  if sudo -n true 2>/dev/null; then
+    exec sudo "$0" "$@"
+  else
+    echo "🔐 Root-Rechte erforderlich. Bitte Passwort eingeben:"
+    exec sudo -k bash "$0" "$@"
+  fi
+fi
 
 # --- User-Erkennung ---
 REAL_USER="${SUDO_USER:-$USER}"
@@ -170,9 +170,8 @@ log "Installations-Skript erfolgreich abgeschlossen."
 
 #Now run the post installer
 if version_gt "$PY_REMOTE_VERSION" "$PY_LOCAL_VERSION"; then
-  log "🚀launchig server component Script post installer .."
-  curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | sudo bash
+  log "🚀 Please launch server component Script post installer .."
+  echo "curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash"
 fi
 
 exit 0
-
