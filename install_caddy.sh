@@ -1,8 +1,11 @@
 #!/bin/bash
-set -euo pipefail
+set -euox pipefail
+
+#supress warnings "setlocale: LC_ALL: cannot change locale (de_DE.UTF-8)"
+export LC_ALL=C
+export LANG=C
 
 echo "🔧 Starting Caddy + Lighttpd installer..."
-
 
 # --- Sudo-Handling ---
 if [[ $EUID -ne 0 ]]; then
@@ -81,11 +84,12 @@ else
   echo "🔐 Caddy GPG key already exists."
 fi
 
+
 # 4. Add Caddy repo if missing
 CADDY_LIST="/etc/apt/sources.list.d/caddy-stable.list"
 if [ ! -f "$CADDY_LIST" ]; then
   echo "🧾 Adding Caddy APT repo..."
-  echo "deb [signed-by=$CADDY_KEYRING] https://dl.cloudsmith.io/public/caddy/stable/deb/debian all main" | \
+  echo "deb [signed-by=$CADDY_KEYRING] https://dl.cloudsmith.io/public/caddy/stable/deb/debian bookworm main" | \
     sudo tee "$CADDY_LIST" > /dev/null
 else
   echo "🧾 Caddy APT repo already defined."
@@ -179,10 +183,10 @@ echo "🔐 checking if root.crt in local cert store folder ..."
 if [ ! -f "/etc/ssl/certs/Caddy_10y_Root.crt" ]; then
   echo "🚀installing caddy root certificate in local certificate store"
   sudo ln -s /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt /etc/ssl/certs/Caddy_10y_Root.crt
-  echo "🔁rehashing ca certificates .."
+  echo "🔁rehashing root certificates (30 seconds) .."
+  sudo c_rehash /etc/ssl/certs
   sudo update-ca-certificates
 fi 
-
 
 lighttpd_conf="/etc/lighttpd/lighttpd.conf"
 rewrite_marker='/webapp/index.html'
