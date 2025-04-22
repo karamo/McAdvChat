@@ -9,24 +9,48 @@ import time
 from datetime import datetime, timedelta
 from collections import deque
 
-UDP_PORT_send = 1799
-UDP_PORT_list = 1799
-UDP_TARGET = ("dk5en-99.local", UDP_PORT_send)
-#UDP_TARGET = ("44.149.17.56", UDP_PORT_send)
-WS_HOST = "0.0.0.0"
-WS_PORT = 2980
-VERSION="v0.4.0"
-
-#7x24 = 168h
-PRUNE_HOURS = 168  # Nachrichten, die älter sind als diese Anzahl Stunden, werden entfernt
-MAX_STORE_SIZE_MB = 50
+VERSION="v0.5.0"
+CONFIG_FILE = "/etc/mcadvchat/config.json"
 
 clients = set()
 message_store = deque()
 message_store_size = 0
-store_file_name = "mcdump.json"
-
 has_console = sys.stdout.isatty()
+
+def load_config(path=CONFIG_FILE):
+    with open(path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    return cfg
+
+def hours_to_dd_hhmm(hours: int) -> str:
+    days = hours // 24
+    remainder_hours = hours % 24
+    return f"{days:02d} day(s) {remainder_hours:02d}:00h"
+
+config = load_config()
+
+UDP_PORT_list = config["UDP_PORT_list"]
+print(f"Listening UDP Port: {UDP_PORT_list}")
+
+UDP_PORT_send = config["UDP_PORT_send"]
+UDP_TARGET = (config["UDP_TARGET"], UDP_PORT_send)
+print(f"MeshCom Target {UDP_TARGET}")
+
+WS_HOST = config["WS_HOST"]
+WS_PORT = config["WS_PORT"]
+print(f"Websockets Host and Port {WS_HOST}:{WS_PORT}")
+
+PRUNE_HOURS = config["PRUNE_HOURS"]
+print(f"Messages older than {hours_to_dd_hhmm(PRUNE_HOURS)} get deleted")
+
+MAX_STORE_SIZE_MB = config["MAX_STORAGE_SIZE_MB"]
+print(f"If we get flooded with messages, we drop after {MAX_STORE_SIZE_MB}MB")
+
+store_file_name = config["STORE_FILE_NAME"]
+print(f"Messages will be stored on exit: {store_file_name}")
+
+
+
 
 def get_current_timestamp() -> str:
     return datetime.utcnow().isoformat()
@@ -52,8 +76,7 @@ async def udp_listener():
     loop = asyncio.get_running_loop()
     try: #neu
       while True:
-        #data, addr = await loop.run_in_executor(None, udp_sock.recvfrom, 1024) #alt
-        data, addr = await loop.sock_recvfrom(udp_sock, 1024) #neu
+        data, addr = await loop.sock_recvfrom(udp_sock, 1024)
 
         text = strip_invalid_utf8(data)
         message = try_repair_json(text)
@@ -72,10 +95,10 @@ async def udp_listener():
 
         if clients:
             await asyncio.gather(*[client.send(json.dumps(message)) for client in clients])
-    except asyncio.CancelledError: #neu
-        print("udp_listener was cancelled. Closing socket.") #neu
-    finally: #neu
-        udp_sock.close()  #neu
+    except asyncio.CancelledError: 
+        print("udp_listener was cancelled. Closing socket.")
+    finally:
+        udp_sock.close()
 
 async def websocket_handler(websocket):
     peer = websocket.remote_address[0] if websocket.remote_address else "Unbekannt"
@@ -102,18 +125,7 @@ async def websocket_handler(websocket):
 
 async def handle_command(msg, websocket):
     if msg == "send message dump" or msg == "send pos dump":
-        #for item in message_store:
-        #     await websocket.send(item["raw"])
-
-        #------------------------------------------------------------------
-        # Step 1: Wrap the message list in a structured JSON object
         raw_list = [item["raw"] for item in message_store]
-        #raw_list = [
-        #    item["raw"].decode("utf-8", errors="replace")
-        #    if isinstance(item["raw"], bytes)
-        #    else item["raw"]
-        #    for item in message_store
-        #]
 
         payload = {
             "type": "response",
@@ -189,12 +201,12 @@ def try_repair_json(text: str) -> dict:
     }
 
 async def main():
+
     load_dump()
     prune_messages()
 
     ws_server = await websockets.serve(websocket_handler, WS_HOST, WS_PORT)
     udp_task = asyncio.create_task(udp_listener())
-
 
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
