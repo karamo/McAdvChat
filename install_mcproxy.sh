@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euox pipefail
+set -euo pipefail
 
 # Determine the user and home
 USER_NAME=$(whoami)
@@ -17,15 +17,15 @@ echo "Home directory: $HOME_DIR"
 if [ ! -f "$VENV_DIR/bin/activate" ]; then
   echo "Creating virtual environment in $VENV_DIR..."
   python3 -m venv "$VENV_DIR"
+
+  # 2. Activate and install websockets
+  echo "🚀Installing 'websockets' into virtualenv..."
+  source "$VENV_DIR/bin/activate"
+  pip install -q --upgrade pip
+  pip install -q websockets
 else
   echo "Virtual environment already exists."
 fi
-
-# 2. Activate and install websockets
-echo "🚀Installing 'websockets' into virtualenv..."
-source "$VENV_DIR/bin/activate"
-pip install -q --upgrade pip
-pip install -q websockets
 
 # 3. Check if the Python script exists
 if [ ! -f "$PY_SCRIPT" ]; then
@@ -34,13 +34,13 @@ if [ ! -f "$PY_SCRIPT" ]; then
 fi
 
 echo "check, if config directory is there .."
-if [ ! -f "$CONFIG_DIR" ]; then
+if [ ! -d "$CONFIG_DIR" ]; then
   echo "Creating configuration directory $CONFIG_DIR"
-  mkdir $CONFIG_DIR
+  sudo mkdir $CONFIG_DIR
 fi 
 
 echo "check, if config file is there .."
-if [ ! -f "$CONFIG_FILE" ]; then
+if [ ! -f "$CONFIG_DIR/$CONFIG_FILE" ]; then
   echo "Creating dummy configutation $CONFIG_DIR/$CONFIG_FILE"
   sudo tee "$CONFIG_DIR/$CONFIG_FILE" > /dev/null <<EOF
 {
@@ -55,6 +55,15 @@ if [ ! -f "$CONFIG_FILE" ]; then
   "VERSION": "v0.0.0"
 }
 EOF
+  echo "now edit your $CONFIG_DIR/$CONFIG_FILE to your environmemt"
+  exit 0
+fi
+
+REQUIRED_TARGET="DK0XXX-99.local"
+
+if jq -e --arg tgt "$REQUIRED_TARGET" '.UDP_TARGET == $tgt' "$CONFIG_DIR/$CONFIG_FILE" > /dev/null; then
+  echo "❌Error: valid parameters missing in $CONFIG_FILE"
+  exit 1
 fi
 
 # 4. Check and create systemd service
