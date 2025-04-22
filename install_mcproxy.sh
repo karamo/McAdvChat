@@ -2,14 +2,14 @@
 set -euo pipefail
 
 # --- Sudo-Handling ---
-if [[ $EUID -ne 0 ]]; then
-  if sudo -n true 2>/dev/null; then
-    exec sudo "$0" "$@"
-  else
-    echo "🔐 Root-Rechte erforderlich. Bitte Passwort eingeben:"
-    exec sudo -k bash "$0" "$@"
-  fi
-fi
+#if [[ $EUID -ne 0 ]]; then
+#  if sudo -n true 2>/dev/null; then
+#    exec sudo "$0" "$@"
+#  else
+#    echo "🔐 Root-Rechte erforderlich. Bitte Passwort eingeben:"
+#    exec sudo -k bash "$0" "$@"
+#  fi
+#fi
 
 # --- User-Erkennung ---
 REAL_USER="${SUDO_USER:-$USER}"
@@ -37,7 +37,7 @@ echo "Home directory: $HOME_DIR"
 
 # 1. Check and create virtualenv
 if [ ! -f "$VENV_DIR/bin/activate" ]; then
-  echo "Creating virtual environment in $VENV_DIR..."
+  echo "Creating virtual environment in $VENV_DIR takes a minute..."
   python3 -m venv "$VENV_DIR"
 
   # 2. Activate and install websockets
@@ -126,3 +126,5 @@ sudo systemctl enable mcproxy.service
 sudo systemctl restart mcproxy.service
 
 echo "✅Service 'mcproxy' successfully installed and started."
+echo "now go to your webbrowser: https://mcapp.local/webap"
+echo "go to settings page and make sure to put in mcapp.local"
