@@ -6,10 +6,11 @@ import os
 import signal
 import sys
 import time
+import unicodedata
 from datetime import datetime, timedelta
 from collections import deque
 
-VERSION="v0.6.0"
+VERSION="v0.7.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 
 clients = set()
@@ -50,6 +51,37 @@ store_file_name = config["STORE_FILE_NAME"]
 print(f"Messages will be stored on exit: {store_file_name}")
 
 
+def is_allowed_char(ch: str) -> bool:
+    codepoint = ord(ch)
+
+    # Explicit whitelist German Umlaut
+    if ch in "äöüÄÖÜß":
+        return True
+    
+    # ASCII 0x20 to 0x5C inclusive
+    if 0x20 <= codepoint <= 0x5C:
+        return True
+    
+    # Allow up to 0x7E?
+    if 0x5D <= codepoint <= 0x7E:
+        return True
+
+    # Reject surrogates, noncharacters
+    if 0xD800 <= codepoint <= 0xDFFF:
+        return False
+    if codepoint & 0xFFFF in [0xFFFE, 0xFFFF]:
+        return False
+    
+    # Reject private use areas
+    if (0xE000 <= codepoint <= 0xF8FF) or (0xF0000 <= codepoint <= 0xFFFFD) or (0x100000 <= codepoint <= 0x10FFFD):
+        return False
+
+    # Accept emojis and standard symbols
+    category = unicodedata.category(ch)
+    if category.startswith("S") or category.startswith("P") or "EMOJI" in unicodedata.name(ch, ""):
+        return True
+    
+    return False
 
 
 def get_current_timestamp() -> str:
@@ -79,7 +111,20 @@ async def udp_listener():
         data, addr = await loop.sock_recvfrom(udp_sock, 1024)
 
         text = strip_invalid_utf8(data)
+
         message = try_repair_json(text)
+        if not message or "msg" not in message:
+           print(f"no msg object found in json: {message}")
+       
+        msg = message["msg"]
+        for c in msg:
+          if not is_allowed_char(c):
+            cp = ord(c)
+            name = unicodedata.name(c, "<unknown>")
+            print(f"[ERROR] Invalid character in msg: '{c}' (U+{cp:04X}, {name})")
+            print(f"found not allowed character in: {message}")
+            message["msg"] = "-- invalid message suppressed --" #we remove bullshit
+
         message["timestamp"] = int(time.time() * 1000)
         dt = datetime.fromtimestamp(message['timestamp']/1000)
         readabel = dt.strftime("%d %b %Y %H:%M:%S")
