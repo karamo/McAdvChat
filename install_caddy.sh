@@ -154,6 +154,13 @@ sudo tee "$CADDYFILE" > /dev/null <<EOF
         }
 }
 
+:443 {
+        tls {
+                protocols tls1.3
+        }
+        respond "Hello with ChaCha?"
+}
+
 $FQDN {
         tls internal
         reverse_proxy 127.0.0.1:80
