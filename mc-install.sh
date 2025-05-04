@@ -130,7 +130,7 @@ fi
 
 # --- Webserver neu starten ---
 log "Reloade Webserver ..."
-#systemctl restart lighttpd || warn "Neustart fehlgeschlagen, versuche Reload"
+systemctl restart lighttpd || warn "Neustart fehlgeschlagen, versuche Reload"
 systemctl reload lighttpd || error "Reload von lighttpd fehlgeschlagen"
 
 # --- Funktionstest ---

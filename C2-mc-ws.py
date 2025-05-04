@@ -152,8 +152,8 @@ async def udp_listener():
           if not is_allowed_char(c):
             cp = ord(c)
             name = unicodedata.name(c, "<unknown>")
-            print(f"[ERROR] Invalid character in msg: '{c}' (U+{cp:04X}, {name})")
-            print(f"found not allowed character in: {message}")
+            print(f"[ERROR] Invalid character: '{c}' (U+{cp:04X}, {name})")
+            print(f"in: {message}")
             message["msg"] = "-- invalid message suppressed --" #we remove bullshit
 
         message["timestamp"] = int(time.time() * 1000)
@@ -166,45 +166,50 @@ async def udp_listener():
             if message["msg"].startswith("{CET}"):
                 if has_console:
                    print(f"{readabel} {message['src_type']} von {addr[0]} Zeit: {message['msg']} ID:{message['msg_id']} src:{message['src']}")
+                   print(f"{readabel} {message['src_type']} von {addr[0]}: {message}")
             else:
                 store_message(message, json.dumps(message)) #wir wollen mit Timestamp speichern
                 if has_console:
                    print(f"{readabel} {message['src_type']} von {addr[0]}: {message}")
 
         if clients:
-            #await asyncio.gather(*[client.send(json.dumps(message)) for client in clients])
             send_tasks = [asyncio.ensure_future(client.send(json.dumps(message))) for client in clients]
             await asyncio.gather(*send_tasks, return_exceptions=True)
-
-
 
     except asyncio.CancelledError: 
         print("udp_listener was cancelled. Closing socket.")
     finally:
         udp_sock.close()
 
+
 async def websocket_handler(websocket):
-    peer = websocket.remote_address[0] if websocket.remote_address else "Unbekannt"
+    peer = websocket.remote_address[0] if websocket.remote_address else "unbekannt"
     print(f"WebSocket verbunden von IP {peer}")
     clients.add(websocket)
+
     try:
         async for message in websocket:
             try:
                 data = json.loads(message)
                 if has_console:
                    print(f"WebSocket empfangen: {data}")
+
                 if data.get("type") == "command":
                    await handle_command(data.get("msg"), websocket)
+
                 elif data.get("type") == "BLE":
-                   #await BLE_send(data.get("msg"), data.get("dst"))
                    await client.send_message(data.get("msg"), data.get("dst"))
+
                 else:
                    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                    udp_sock.sendto(json.dumps(data).encode("utf-8"), UDP_TARGET)
+
             except json.JSONDecodeError:
                 print(f"Fehler: Ungültiges JSON über WebSocket empfangen: {message}")
+
     except websockets.exceptions.ConnectionClosed as e:
         print(f"WebSocket getrennt von {peer}, Grund: {e.code} - {e.reason}")
+
     finally:
         print(f"WebSocket getrennt von IP {peer}")
         clients.remove(websocket)
@@ -234,16 +239,22 @@ async def handle_command(msg, websocket):
         with open(store_file_name, "w", encoding="utf-8") as f:
             json.dump(list(message_store), f, ensure_ascii=False, indent=2)
         print("Daten gespeichert in mcdump.json")
+
     elif msg == "scan BLE":
         await scan_ble_devices()
+
     elif msg == "BLE info":
         await ble_info()
+
     elif msg == "pair BLE":
         await ble_pair()
+
     elif msg == "unpair BLE":
         await ble_unpair()
+
     elif msg == "disconnect BLE":
         await ble_disconnect()
+
     elif msg == "connect BLE":
         await ble_connect()
 
@@ -252,7 +263,6 @@ async def handle_command(msg, websocket):
 
     elif msg.startswith("--"):
         await client.a0_commands(msg)
-    #elif msg == "send Message": #ist kein Befehl!
 
     else:
         print(f"command not available", msg)
@@ -336,6 +346,7 @@ class BLEClient:
         except DBusError as e:
             print(f"⚠️ StartNotify fehlgeschlagen: {e}")
 
+
     def _on_props_changed(self, iface, changed, invalidated):
       if iface != GATT_CHARACTERISTIC_INTERFACE:
         return
@@ -347,8 +358,14 @@ class BLEClient:
         if self._on_value_change_cb:
             self._on_value_change_cb(new_value)
 
+
     async def stop_notify(self):
+        if not self.bus:
+           print("🛑 connection not established, can't stop notify ..")
+           return
+
         if not self.read_char_iface:
+           print("🛑 no read interface, can't stop notify ..")
             return
         try:
             await self.read_char_iface.call_stop_notify()
@@ -378,9 +395,8 @@ class BLEClient:
         else:
             print("⚠️ Keine Write-Charakteristik verfügbar")
 
+
     async def send_message(self, msg, grp):
-        #wenn wir nicht connected sind, dann gehts hier nicht weiter
-        print("debug: send_message command ..")
         if not self.bus:
            print("🛑 connection not established, can't send ..")
            return
@@ -392,20 +408,12 @@ class BLEClient:
            await self.close() #aufräumen, vielleicht hilft es etwas
            return
 
-        #grp = "DK5EN-99"
-        #print("debug", msg, grp)
-        #grp = "TEST"
-        #msg = "Test  über Bluetooth"
-
         message = "{" + grp + "}" + msg
         byte_array = bytearray(message.encode('utf-8'))
-        #print("message",byte_array)
 
         laenge = len(byte_array) + 2
-        #print("länge",laenge)
 
         byte_array = laenge.to_bytes(1, 'big') +  bytes ([0xA0]) + byte_array
-        #print("message",byte_array)
 
         if self.write_char_iface:
             await self.write_char_iface.call_write_value(byte_array, {})
@@ -429,7 +437,6 @@ class BLEClient:
        #--display on/off
        #--gateway on/off
     async def a0_commands(self, cmd):
-        #wenn wir nicht connected sind, dann gehts hier nicht weiter
         if not self.bus:
            print("🛑 connection not established, can't send ..")
            return
@@ -443,12 +450,14 @@ class BLEClient:
             print("debug: close ..")
             return
 
-        print(f"✅ ready to send")
+        #print(f"✅ ready to send")
 
         byte_array = bytearray(cmd.encode('utf-8'))
 
         laenge = len(byte_array) + 2
+
         byte_array = laenge.to_bytes(1, 'big') +  bytes ([0xA0]) + byte_array
+
         if self.write_char_iface:
             await self.write_char_iface.call_write_value(byte_array, {})
             print(f"📨 Message sent .. {byte_array}")
@@ -462,7 +471,7 @@ class BLEClient:
     async def set_commands(self, cmd):
        laenge = 0
        print("special commands, not yet implemented")
-       #wenn wir nicht connected sind, dann gehts hier nicht weiter
+       
        if not self.bus:
           print("🛑 connection not established, can't send ..")
           return
@@ -542,6 +551,7 @@ class BLEClient:
 
     async def disconnect(self):
         print("⬇️ disconnect ..")
+
         if not self.dev_iface:
             return
         try:
