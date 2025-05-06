@@ -25,7 +25,6 @@ from dbus_next.service import ServiceInterface, method
 VERSION="v0.7.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 
-
 BLUEZ_SERVICE_NAME = "org.bluez"
 ADAPTER_INTERFACE = "org.bluez.Adapter1"
 DEVICE_INTERFACE = "org.bluez.Device1"
@@ -41,9 +40,10 @@ write_char_uuid = "6e400002-b5a3-f393-e0a9-e50e24dcca9e" # UUID_Char_WRITE
 hello_byte = bytes([0x04, 0x10, 0x20, 0x30])
 
 clients = set()
+clients_lock = asyncio.Lock()
+
 message_store = deque()
 message_store_size = 0
-has_console = sys.stdout.isatty()
 
 def load_config(path=CONFIG_FILE):
     with open(path, "r", encoding="utf-8") as f:
@@ -55,34 +55,11 @@ def hours_to_dd_hhmm(hours: int) -> str:
     remainder_hours = hours % 24
     return f"{days:02d} day(s) {remainder_hours:02d}:00h"
 
-config = load_config()
-
-UDP_PORT_list = config["UDP_PORT_list"]
-print(f"Listening UDP Port: {UDP_PORT_list}")
-
-UDP_PORT_send = config["UDP_PORT_send"]
-UDP_TARGET = (config["UDP_TARGET"], UDP_PORT_send)
-print(f"MeshCom Target {UDP_TARGET}")
-
-WS_HOST = config["WS_HOST"]
-WS_PORT = config["WS_PORT"]
-print(f"Websockets Host and Port {WS_HOST}:{WS_PORT}")
-
-PRUNE_HOURS = config["PRUNE_HOURS"]
-print(f"Messages older than {hours_to_dd_hhmm(PRUNE_HOURS)} get deleted")
-
-MAX_STORE_SIZE_MB = config["MAX_STORAGE_SIZE_MB"]
-print(f"If we get flooded with messages, we drop after {MAX_STORE_SIZE_MB}MB")
-
-store_file_name = config["STORE_FILE_NAME"]
-print(f"Messages will be stored on exit: {store_file_name}")
-
-
 def is_allowed_char(ch: str) -> bool:
     codepoint = ord(ch)
 
     # Explicit whitelist German Umlaut
-    if ch in "äöüÄÖÜß":
+    if ch in "äöüÄÖÜßé":
         return True
     
     # ASCII 0x20 to 0x5C inclusive
@@ -114,6 +91,35 @@ def is_allowed_char(ch: str) -> bool:
     
     return False
 
+# UTF-8 Fixer
+def strip_invalid_utf8(data: bytes) -> str:
+    valid_text = ''
+    i = 0
+    while i < len(data):
+        try:
+            char = data[i:i+1]
+            char = char.decode("utf-8")
+            valid_text += char
+            i += 1
+        except UnicodeDecodeError:
+            i += 1
+    return data.decode("utf-8", errors="ignore")
+
+# JSON Repair
+def try_repair_json(text: str) -> dict:
+    for i in range(len(text)):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            pos = e.pos if hasattr(e, 'pos') else i
+            if pos >= len(text):
+                break
+            text = text[:pos] + text[pos+1:]
+    return {
+        "raw_text": text,
+        "error": "invalid_json_repair_failed"
+    }
+
 
 def get_current_timestamp() -> str:
     return datetime.utcnow().isoformat()
@@ -134,7 +140,7 @@ def store_message(message: dict, raw: str):
 async def udp_listener():
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_sock.bind(("", UDP_PORT_list))
-    udp_sock.setblocking(False)  # neu
+    udp_sock.setblocking(False)
 
     loop = asyncio.get_running_loop()
     try: 
@@ -154,7 +160,7 @@ async def udp_listener():
             name = unicodedata.name(c, "<unknown>")
             print(f"[ERROR] Invalid character: '{c}' (U+{cp:04X}, {name})")
             print(f"in: {message}")
-            message["msg"] = "-- invalid message suppressed --" #we remove bullshit
+            message["msg"] = "-- invalid character --" #we remove bullshit
 
         message["timestamp"] = int(time.time() * 1000)
         dt = datetime.fromtimestamp(message['timestamp']/1000)
@@ -168,12 +174,20 @@ async def udp_listener():
                    print(f"{readabel} {message['src_type']} von {addr[0]} Zeit: {message['msg']} ID:{message['msg_id']} src:{message['src']}")
                    print(f"{readabel} {message['src_type']} von {addr[0]}: {message}")
             else:
-                store_message(message, json.dumps(message)) #wir wollen mit Timestamp speichern
+                #store_message(message, json.dumps(message)) #wir wollen mit Timestamp speichern
+                await loop.run_in_executor(None, store_message, message, json.dumps(message))
+                    
                 if has_console:
                    print(f"{readabel} {message['src_type']} von {addr[0]}: {message}")
 
-        if clients:
-            send_tasks = [asyncio.ensure_future(client.send(json.dumps(message))) for client in clients]
+        async with clients_lock:
+                targets = list(clients)
+
+        #if clients:
+        if targets:
+           #send_tasks = [asyncio.ensure_future(client.send(json.dumps(message))) for client in clients]
+            send_tasks = [asyncio.create_task(client.send(json.dumps(message))) for client in targets]
+            #await asyncio.gather(*send_tasks, return_exceptions=True)
             await asyncio.gather(*send_tasks, return_exceptions=True)
 
     except asyncio.CancelledError: 
@@ -181,11 +195,11 @@ async def udp_listener():
     finally:
         udp_sock.close()
 
-
 async def websocket_handler(websocket):
     peer = websocket.remote_address[0] if websocket.remote_address else "unbekannt"
     print(f"WebSocket verbunden von IP {peer}")
-    clients.add(websocket)
+    async with clients_lock:
+      clients.add(websocket)
 
     try:
         async for message in websocket:
@@ -198,11 +212,19 @@ async def websocket_handler(websocket):
                    await handle_command(data.get("msg"), websocket)
 
                 elif data.get("type") == "BLE":
-                   await client.send_message(data.get("msg"), data.get("dst"))
+                   #await client.send_message(data.get("msg"), data.get("dst"))
+                   loop = asyncio.get_running_loop()
+                   await loop.run_in_executor(None, client.send_message, data.get("msg"), data.get("dst"))
+
 
                 else:
                    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                   udp_sock.sendto(json.dumps(data).encode("utf-8"), UDP_TARGET)
+                   #udp_sock.sendto(json.dumps(data).encode("utf-8"), UDP_TARGET)
+                   # UDP send in Thread auslagern
+                   loop = asyncio.get_running_loop()
+                   await loop.run_in_executor(None, udp_sock.sendto,
+                                              json.dumps(data).encode("utf-8"),
+                                              UDP_TARGET)
 
             except json.JSONDecodeError:
                 print(f"Fehler: Ungültiges JSON über WebSocket empfangen: {message}")
@@ -212,7 +234,8 @@ async def websocket_handler(websocket):
 
     finally:
         print(f"WebSocket getrennt von IP {peer}")
-        clients.remove(websocket)
+        async with clients_lock:
+          clients.remove(websocket)
 
 
 async def handle_command(msg, websocket):
@@ -287,6 +310,11 @@ class BLEClient:
         self._on_value_change_cb = None
 
     async def connect(self):
+      async with self._connect_lock:
+        if self._connected:
+             print(f"🔁 Verbindung zu {self.mac} besteht bereits (aus Cache)")
+             return
+
         if self.bus is None:
            self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
 
@@ -295,7 +323,15 @@ class BLEClient:
         self.dev_iface = self.device_obj.get_interface(DEVICE_INTERFACE)
         self.props_iface = self.device_obj.get_interface(PROPERTIES_INTERFACE)
 
-        connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
+        #connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
+
+        try:
+           connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
+        except DBusError as e:
+           print(f"⚠️ Fehler beim Abfragen des Verbindungsstatus: {e}")
+           self._connected = False
+           return
+
         if not connected:
            try:
              await self.dev_iface.call_connect()
@@ -314,15 +350,48 @@ class BLEClient:
         
         self.read_props_iface = self.read_char_obj.get_interface(PROPERTIES_INTERFACE)
 
-        is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
-        print("Notifications sind .. ", is_notifying)
+        #is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
+        #print("Notifications sind .. ", is_notifying)
+        try:
+          is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
+          print("Notifications sind .. ", is_notifying)
+        except DBusError as e:
+             print(f"⚠️ Fehler beim Abfragen von Notifying: {e}")
 
+        self._connected = True
 
     async def _find_characteristics(self):
         self.read_char_obj, self.read_char_iface = await find_gatt_characteristic(
             self.bus, self.path, self.read_uuid)
         self.write_char_obj, self.write_char_iface = await find_gatt_characteristic(
             self.bus, self.path, self.write_uuid)
+    async def find_gatt_characteristic(bus, path, target_uuid):
+     try:
+        introspect = await bus.introspect(BLUEZ_SERVICE_NAME, path)
+     except Exception as e:
+        return None, None
+
+     for node in introspect.nodes:
+        child_path = f"{path}/{node.name}"
+        try:
+            child_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, child_path, await bus.introspect(BLUEZ_SERVICE_NAME, child_path))
+
+            props_iface = child_obj.get_interface(PROPERTIES_INTERFACE)
+
+            props = await props_iface.call_get_all(GATT_CHARACTERISTIC_INTERFACE)
+
+            uuid = props.get("UUID").value.lower()
+            if uuid == target_uuid.lower():
+                char_iface = child_obj.get_interface(GATT_CHARACTERISTIC_INTERFACE)
+                return child_obj, char_iface
+
+        except Exception:
+            # Falls keine Properties oder keine GattCharacteristic1, rekursiv weitersuchen
+            obj, iface = await find_gatt_characteristic(bus, child_path, target_uuid)
+            if iface:
+                return obj, iface  # ❗beides weitergeben
+
+     return None, None
 
     async def start_notify(self, on_change=None):
         print("▶️  Start notify ..")
@@ -346,7 +415,6 @@ class BLEClient:
         except DBusError as e:
             print(f"⚠️ StartNotify fehlgeschlagen: {e}")
 
-
     def _on_props_changed(self, iface, changed, invalidated):
       if iface != GATT_CHARACTERISTIC_INTERFACE:
         return
@@ -358,7 +426,6 @@ class BLEClient:
         if self._on_value_change_cb:
             self._on_value_change_cb(new_value)
 
-
     async def stop_notify(self):
         if not self.bus:
            print("🛑 connection not established, can't stop notify ..")
@@ -366,7 +433,7 @@ class BLEClient:
 
         if not self.read_char_iface:
            print("🛑 no read interface, can't stop notify ..")
-            return
+           return
         try:
             await self.read_char_iface.call_stop_notify()
             print("🛑 Notify gestoppt")
@@ -395,7 +462,6 @@ class BLEClient:
         else:
             print("⚠️ Keine Write-Charakteristik verfügbar")
 
-
     async def send_message(self, msg, grp):
         if not self.bus:
            print("🛑 connection not established, can't send ..")
@@ -416,8 +482,13 @@ class BLEClient:
         byte_array = laenge.to_bytes(1, 'big') +  bytes ([0xA0]) + byte_array
 
         if self.write_char_iface:
-            await self.write_char_iface.call_write_value(byte_array, {})
-            print(f"📨 Message sent .. {byte_array}")
+            try:
+              await asyncio.wait_for(self.write_char_iface.call_write_value(byte_array, {}), timeout=5)
+              print(f"📨 Message sent .. {byte_array}")
+            except asyncio.TimeoutError:
+              print("🕓 Timeout beim Schreiben an BLE-Device")
+            except Exception as e:
+              print(f"💥 Fehler beim Schreiben an BLE: {e}")
         else:
             print("⚠️ Keine Write-Charakteristik verfügbar")
 
@@ -547,7 +618,37 @@ class BLEClient:
        #(Aus Z.365ff https://github.com/icssw-org/MeshCom-Firmware/blob/oe1kfr_434q/src/phone_commands.cpp)
        
        print(f"alles zusammen und raus damit {cmd_byte} {laenge}")
-   
+
+    async def monitor_connection(self):
+        if not self.bus:
+            print("⚠️ Kein D-Bus verbunden")
+            return
+
+        def handle_properties_changed(message):
+            if message.message_type != MessageType.SIGNAL:
+                return
+            if message.interface != "org.freedesktop.DBus.Properties":
+                return
+            if message.member != "PropertiesChanged":
+                return
+            if message.path != self.path:
+                return
+
+            interface_name, changed_props, _ = message.body
+            if interface_name != DEVICE_INTERFACE:
+                return
+
+            if "Connected" in changed_props:
+                connected = changed_props["Connected"].value
+                if not connected:
+                    print(f"📴 Verbindung zu {self.mac} wurde unterbrochen!")
+                    self._connected = False
+                    self.bus = None
+                    # evtl. neu verbinden oder clean-up triggern
+
+        self.bus.add_message_handler(handle_properties_changed)
+        print(f"👂 Überwache BLE-Verbindung zu {self.mac}")
+
 
     async def disconnect(self):
         print("⬇️ disconnect ..")
@@ -636,31 +737,6 @@ class BLEClient:
       await self.disconnect()
       #self.bus.disconnect()
 
-async def ble_info():
-    print("BLE info dummy");
-    await client.ble_info()
-
-#    mac = "D4:D4:DA:9E:B5:62"
-#    path = mac_to_dbus_path(mac)
-
-#    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-
-#    try:
-#        device_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, path,
-#                                          await bus.introspect(BLUEZ_SERVICE_NAME, path))
-#        dev_iface = device_obj.get_interface(DEVICE_INTERFACE)
-        #props_iface = device_obj.get_interface("org.freedesktop.DBus.Properties")
-#        props_iface = device_obj.get_interface(PROPERTIES_INTERFACE)
-
-#        props = await props_iface.call_get_all(DEVICE_INTERFACE)
-
-#        print("🔍 BLE Device Info:")
-#        for key, val in props.items():
-            # Handle Variant wrapper
-#            print(f"  {key}: {val.value}")
-
-#    except Exception as e:
-#        print(f"❌ Failed to fetch info for {mac}: {e}")
 
 class NoInputNoOutputAgent(ServiceInterface):
     def __init__(self):
@@ -699,29 +775,10 @@ class NoInputNoOutputAgent(ServiceInterface):
     def Cancel(self):
         print("Request cancelled")
 
-async def ble_unpair():
-    mac="D4:D4:DA:9E:B5:62"
-    print(f"🧹 Unpairing {mac} using blueZ ...")
-
-    device_path = mac_to_dbus_path(mac)
-    adapter_path = "/org/bluez/hci0"
-
-    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-
-    # Unpairing logic
-    adapter_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, adapter_path,
-                                   await bus.introspect(BLUEZ_SERVICE_NAME, adapter_path))
-    adapter_iface = adapter_obj.get_interface("org.bluez.Adapter1")
-
-    await adapter_iface.call_remove_device(device_path)
-    print(f"🧹 Unpaired device {mac}")
-
 
 async def ble_pair():
     mac="D4:D4:DA:9E:B5:62"
-
     path = mac_to_dbus_path(mac)
-    
     bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
 
     # Register agent
@@ -756,158 +813,54 @@ async def ble_pair():
 
         await asyncio.sleep(2)  # allow time for registration to settle
 
-        #try:
-        #   await dev_iface.call_disconnect()
-        #   print(f"🔌 Disconnected from {mac} after pairing.")
-        #except Exception as e:
-        #   print(f"⚠️ Could not disconnect from {mac}: {e}")
+        try:
+           await dev_iface.call_disconnect()
+           print(f"🔌 Disconnected from {mac} after pairing.")
+        except Exception as e:
+           print(f"⚠️ Could not disconnect from {mac}: {e}")
 
     except Exception as e:
         print(f"❌ Failed to pair with {mac}: {e}")
 
+async def ble_unpair():
+    mac="D4:D4:DA:9E:B5:62"
+    print(f"🧹 Unpairing {mac} using blueZ ...")
+
+    device_path = mac_to_dbus_path(mac)
+    adapter_path = "/org/bluez/hci0"
+
+    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+
+    # Unpairing logic
+    adapter_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, adapter_path,
+                                   await bus.introspect(BLUEZ_SERVICE_NAME, adapter_path))
+    adapter_iface = adapter_obj.get_interface("org.bluez.Adapter1")
+
+    await adapter_iface.call_remove_device(device_path)
+    print(f"🧹 Unpaired device {mac}")
 
 
-
-#def handle_notification(interface_name, changed, invalidated):
-#    print(f"🔥 PropertiesChanged: {interface_name}, changed: {changed}")
-#    if "Value" in changed:
-#        data = bytes(changed["Value"].value)
-#        print(f"📨 Notification received: {data}")
-#    else:
-#        print(f"🔥 PropertiesChanged: {interface_name}, changed: {changed}")
-
-#def on_props_changed(interface_name, changed, invalidated):
-#    if "Value" in changed:
-#        handle_notification(interface_name, changed, invalidated)
-
-async def find_gatt_characteristic(bus, path, target_uuid):
-    try:
-        introspect = await bus.introspect(BLUEZ_SERVICE_NAME, path)
-    except Exception as e:
-        return None, None
-
-    for node in introspect.nodes:
-        child_path = f"{path}/{node.name}"
-        try:
-            child_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, child_path, await bus.introspect(BLUEZ_SERVICE_NAME, child_path))
-
-            props_iface = child_obj.get_interface(PROPERTIES_INTERFACE)
-
-            props = await props_iface.call_get_all(GATT_CHARACTERISTIC_INTERFACE)
-
-            uuid = props.get("UUID").value.lower()
-            if uuid == target_uuid.lower():
-                char_iface = child_obj.get_interface(GATT_CHARACTERISTIC_INTERFACE)
-                return child_obj, char_iface
-
-        except Exception:
-            # Falls keine Properties oder keine GattCharacteristic1, rekursiv weitersuchen
-            obj, iface = await find_gatt_characteristic(bus, child_path, target_uuid)
-            if iface:
-                return obj, iface  # ❗beides weitergeben
-
-    return None, None
-
-async def ble_disconnect():
-        print("BLE disconnect dummy");
-        await client.disconnect()
-        await client.close()
-
-        #mac = "D4:D4:DA:9E:B5:62"  # Example MAC
-        #path = mac_to_dbus_path(mac)
-        #bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-
-    #try:
-        #device_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, path, await bus.introspect(BLUEZ_SERVICE_NAME, path))
-        #dev_iface = device_obj.get_interface(DEVICE_INTERFACE)
-
-        #read_char_obj, read_char_iface = await find_gatt_characteristic(bus, path, read_char_uuid)
-        #props_iface = read_char_obj.get_interface(PROPERTIES_INTERFACE)
-
-        #props = await props_iface.call_get_all(GATT_CHARACTERISTIC_INTERFACE)
-        #print("Props", props);
-
-        #is_notifying = (await props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
-        #print("Notifications sind ..", is_notifying);
-       
-        #if is_notifying:
-        #   await read_char_iface.call_stop_notify()
-        #   print("🛑 Notifications gestoppt")
-        #else:
-        #   print("ℹ️ Keine aktive Notify-Session – StopNotify() übersprungen") 
-
-        # Call the disconnect method
-        #await dev_iface.call_disconnect()
-        #print(f"✅ Successfully disconnected from {mac}")
-    #except Exception as e:
-    #    print(f"❌ Failed to disconnect from {mac}: {e}")
 
 
 async def ble_connect():
-    #print("BLE connect dummy");
-    #client = BLEClient(
-    #    mac ="D4:D4:DA:9E:B5:62",
-    #    read_uuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e", # UUID_Char_NOTIFY
-    #    write_uuid = "6e400002-b5a3-f393-e0a9-e50e24dcca9e", # UUID_Char_WRITE
-    #    hello_bytes = b'\x04\x10\x20\x30'
-    #)
-
     await client.connect()
     await client.start_notify()
+    await self.monitor_connection()
     await client.send_hello()
-    #return client
 
-    #mac = "D4:D4:DA:9E:B5:62"  # Your target BLE MAC
-    #path = mac_to_dbus_path(mac)
-    #bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-
-    #try:
-    #    device_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, path, await bus.introspect(BLUEZ_SERVICE_NAME, path))
-    #    dev_iface = device_obj.get_interface(DEVICE_INTERFACE)
-
-    #    # Call connect
-    #    await dev_iface.call_connect()
-    #    print(f"✅ Successfully connected to {mac}")
-
-    #    read_char_obj, read_char_iface = await find_gatt_characteristic(bus, path, read_char_uuid)
-    #    write_char_obj, write_char_iface = await find_gatt_characteristic(bus, path, write_char_uuid)
-
-    #    if not read_char_iface or not write_char_iface:
-    #        print("❌ Could not find required characteristics")
-    #        return
-
-    #    props_iface = read_char_obj.get_interface(PROPERTIES_INTERFACE)
-    #    is_notifying = (await props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
-    #    print("Notifications sind .. ", is_notifying)
-
-    #    if (is_notifying):
-    #      print("📡 Notifications waren schon gestartet")
-    #    else:
-    #      props_iface.on_properties_changed(handle_notification)
-    #      await read_char_iface.call_start_notify()
-    #      print("📡 Notifications gestartet")
-
-    #    # HELLO - aufwachen, es geht los
-    #    await write_char_iface.call_write_value(bytes(hello_byte), {})
-
-    #    #await read_char_iface.call_stop_notify()
-    #except Exception as e:
-    #   print(f"❌ Failed to connect to {mac}: {e}")
+async def ble_disconnect():
+    print("BLE disconnect dummy");
+    await client.disconnect()
+    await client.close()
 
 async def scan_ble_devices():
-     await client.scan_ble_devices()
+    await client.scan_ble_devices()
 
-#    print("Please give me a second to complete bluetooth scan for MC-* ..")
-#    devices = await BleakScanner.discover()
-#    for device in devices:
-#      #if device.name.startswith("MC-"):
-#        print(f"Device {device.name}, Address: {device.address}, RSSI: {device._rssi}")
-#
-#    print(f"finished scanning ..")
+async def ble_info():
+    await client.ble_info()
 
 
 def notification_handler(clean_msg):
-
     # JSON-Nachrichten beginnen mit 'D{'
     if clean_msg.startswith(b'D{'):
 
@@ -967,7 +920,7 @@ def notification_handler(clean_msg):
     else:
         print("Unbekannter Nachrichtentyp.")
 
-
+#BLE Handling
 def calc_fcs(msg):
     fcs = 0
     for x in range(0,len(msg)):
@@ -1036,7 +989,6 @@ def decode_binary_message(byte_msg):
       remaining_msg = remaining_msg[split_idx + 1:]
 
       # Extrahiere Dest-Type (`dt`)
-
       if payload_type == 58:
         split_idx = remaining_msg.find(b':')
       elif payload_type == 33:
@@ -1124,37 +1076,8 @@ def load_dump():
             message_store_size = sum(len(json.dumps(m).encode("utf-8")) for m in message_store)
             print(f"{len(message_store)} Nachrichten ({message_store_size / 1024:.2f} KB) geladen")
 
-# UTF-8 Fixer
-def strip_invalid_utf8(data: bytes) -> str:
-    valid_text = ''
-    i = 0
-    while i < len(data):
-        try:
-            char = data[i:i+1]
-            char = char.decode("utf-8")
-            valid_text += char
-            i += 1
-        except UnicodeDecodeError:
-            i += 1
-    return data.decode("utf-8", errors="ignore")
-
-# JSON Repair
-def try_repair_json(text: str) -> dict:
-    for i in range(len(text)):
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError as e:
-            pos = e.pos if hasattr(e, 'pos') else i
-            if pos >= len(text):
-                break
-            text = text[:pos] + text[pos+1:]
-    return {
-        "raw_text": text,
-        "error": "invalid_json_repair_failed"
-    }
 
 async def main():
-
     load_dump()
     prune_messages()
 
@@ -1190,8 +1113,8 @@ async def main():
     #else:
     #   print("Kein Terminal erkannt – Eingabe von 'q' deaktiviert")
 
-    print(f"WebSocket ws://{WS_HOST}:{WS_PORT}")
-    print(f"UDP-Proxy {UDP_PORT_list}, MeshCom {UDP_TARGET}")
+    #print(f"WebSocket ws://{WS_HOST}:{WS_PORT}")
+    print(f"UDP-Listen {UDP_PORT_list}, Target MeshCom {UDP_TARGET}")
 
     await stop_event.wait()
 
@@ -1207,6 +1130,7 @@ async def main():
 
     udp_task.cancel()
     print("nach udp_task.cancel …")
+
     ws_server.close()
     print("nach ws_server.close …")
 
@@ -1219,12 +1143,39 @@ async def main():
 
 
 if __name__ == "__main__":
+    has_console = sys.stdout.isatty()
+    config = load_config()
+
+    UDP_PORT_list = config["UDP_PORT_list"]
+    UDP_PORT_list = 1800
+    #print(f"Listening UDP Port: {UDP_PORT_list}")
+
+    UDP_PORT_send = config["UDP_PORT_send"]
+    UDP_TARGET = (config["UDP_TARGET"], UDP_PORT_send)
+    UDP_TARGET = ("192.168.68.56", UDP_PORT_send)
+    #print(f"MeshCom Target {UDP_TARGET}")
+
+    WS_HOST = config["WS_HOST"]
+    WS_PORT = config["WS_PORT"]
+    WS_PORT = 2960
+    print(f"Websockets Host and Port {WS_HOST}:{WS_PORT}")
+
+    PRUNE_HOURS = config["PRUNE_HOURS"]
+    print(f"Messages older than {hours_to_dd_hhmm(PRUNE_HOURS)} get deleted")
+
+    MAX_STORE_SIZE_MB = config["MAX_STORAGE_SIZE_MB"]
+    print(f"If we get flooded with messages, we drop after {MAX_STORE_SIZE_MB}MB")
+
+    store_file_name = config["STORE_FILE_NAME"]
+    print(f"Messages will be stored on exit: {store_file_name}")
+
     client = BLEClient(
         mac ="D4:D4:DA:9E:B5:62",
         read_uuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e", # UUID_Char_NOTIFY
         write_uuid = "6e400002-b5a3-f393-e0a9-e50e24dcca9e", # UUID_Char_WRITE
         hello_bytes = b'\x04\x10\x20\x30'
     )
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
