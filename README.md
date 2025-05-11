@@ -1,8 +1,10 @@
 # McApp initial release with draft install guide server components and webapp directory
-McApp is a single page, client rendered web application. It should run on every browser out there, but you never know.  Settings get stored in your browser. If you delete your browser cache, you need to setup the connection parameters again.
-Everything is rendered on the client, the raspberry pi is only sending and receiving UDP LoRa and TCP web traffic.
-- No LightSQL, no PHP, just static web pages
-- On initial page load, a memory dump from the UDP proxy gets sent to the browser. So every time you refresh your browser, you get a fresh reload.
+McApp is a single page, client rendered, web application. It should run on every modern browser out there, but you never know. Settings get stored in your browser. If you delete your browser cache, everything is reset.
+
+Rendering  on the client, the Raspberry Pi is only sending and receiving UDP LoRa and TCP web traffic.
+- No LightSQL - we have an SD Card that does not handle well constant writes
+- no PHP as this means, we need page reloads which is slow and not so elegant in 2025, just static web page is retrieved once
+- On initial page load, a dump from the UDP proxy gets sent to your browser. So every time you refresh your browser, you get a fresh reload.
 
 # McAdvChat - CI/CD Pipeline – Lightweight GitHub-Driven Deployment
 
@@ -14,22 +16,43 @@ Everything is rendered on the client, the raspberry pi is only sending and recei
 
 Dieses Projekt verwendet ein minimalistisches, aber robustes Shell-basiertes Deployment-System:
 
+After you have created a fresh SD Card:
+    curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_caddy.sh | bash
+Prepares the system for what is then installed
+
+Then you need to install the latest webpage and skritps.
+Every time the App shows a new version, you need to execute this:
+   curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-install.sh | sudo bash
+
+After you have everything on your machine, we need to make sure, that the proxy is updated:
+   curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash
+
+You will find your configuration on:
+  sudo vi /etc/mcwebapp/config.json
+
+.. please refer to the install guide, as it has screenshots available
+
 ### 🧱 `release.sh` – Build & Publis (hidden, not public)
 
-Dieses Script:
-- baut die WebApp (`npm run build`)
-- tar-komprimiert den `/dist` Ordner
-- erstellt automatisch ein `release.json` mit Metadaten (Version, Datum)
-- generiert ein `CHANGELOG.md` aus den Dateiunterschieden seit dem letzten Release
-- erhöht automatisch die `Minor`-Version (`vX.Y.0`)
-- erstellt ein neues GitHub Release und lädt `dist.tar.gz` in öffentliche Repo hoch
+You can install this app and as of May 2025, I am constantly updating it, to refelect latest issues and development of MeshCom
+
+How I package my application with the release script:
+- is building the WebApp (`npm run build`)
+- tar-balls the `/dist` folder
+- automatically creates the `release.json` with Metadata (version, date)
+- generates a `CHANGELOG.md` that shows what files have been changed
+- automaticall increments `Minor`-version (`vX.Y.0`)
+- create a new GitHub Release and then pushes `dist.tar.gz` in the public Repo that the whole world has access to
 
 ### ⚙️ `install.sh` – Remote Bootstrap Installer
 
-Dieses Script wird direkt auf einem Zielsystem (z. B. Raspberry Pi) ausgeführt:
+There are scripts, that are stored on GitHub, so they are ever green to be executed on the target machine (e.g. Raspberry Pi Zero 2W):
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-install.sh | sudo bash
+
+   curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-install.sh | sudo bash
+   curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash
+
+
 
 # McApp Pflichtenheft 
 
