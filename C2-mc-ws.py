@@ -22,7 +22,7 @@ from dbus_next.errors import DBusError
 from dbus_next.service import ServiceInterface, method
 #from bluezero import constants
 
-VERSION="v0.7.0"
+VERSION="v0.8.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 
 BLUEZ_SERVICE_NAME = "org.bluez"
@@ -58,9 +58,13 @@ def hours_to_dd_hhmm(hours: int) -> str:
 def is_allowed_char(ch: str) -> bool:
     codepoint = ord(ch)
 
-    # Explicit whitelist German Umlaut
-    if ch in "äöüÄÖÜßé":
+    # Explicit whitelist European Umlaut
+    if ch in "äöüÄÖÜßäàáâãåāéèêëėîïíīìôòóõōûùúūÀÁÂÃÅĀÉÈÊËĖÎÏÍĪÌÔÒÓÕŌÜÛÙÚŪśšŚŠÿçćčñń":
         return True
+
+    #we allow newline, but officially this isn't allowed in APRS messages, so it's a scripting mistake, that should be corrected
+    if codepoint == 0x0A: 
+        return True 
     
     # ASCII 0x20 to 0x5C inclusive
     if 0x20 <= codepoint <= 0x5C:
@@ -1141,23 +1145,20 @@ async def main():
         json.dump(list(message_store), f, ensure_ascii=False, indent=2)
     print("Daten gespeichert.")
 
-
 if __name__ == "__main__":
     has_console = sys.stdout.isatty()
     config = load_config()
 
     UDP_PORT_list = config["UDP_PORT_list"]
-    UDP_PORT_list = 1800
-    #print(f"Listening UDP Port: {UDP_PORT_list}")
+#    UDP_PORT_list = 1800
 
     UDP_PORT_send = config["UDP_PORT_send"]
     UDP_TARGET = (config["UDP_TARGET"], UDP_PORT_send)
-    UDP_TARGET = ("192.168.68.56", UDP_PORT_send)
-    #print(f"MeshCom Target {UDP_TARGET}")
+#    UDP_TARGET = ("192.168.68.56", UDP_PORT_send)
 
     WS_HOST = config["WS_HOST"]
     WS_PORT = config["WS_PORT"]
-    WS_PORT = 2960
+#    WS_PORT = 2960
     print(f"Websockets Host and Port {WS_HOST}:{WS_PORT}")
 
     PRUNE_HOURS = config["PRUNE_HOURS"]
