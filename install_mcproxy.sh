@@ -43,15 +43,16 @@ if [ ! -f "$VENV_DIR/bin/activate" ]; then
   # 2. Activate and install websockets
   echo "🚀Installing 'websockets' into virtualenv..."
   source "$VENV_DIR/bin/activate"
-  #pip install --upgrade pip
-  #pip install --upgrade websockets
-  #pip install --upgrade dbus_next
+  pip install --upgrade pip
+  pip install websockets
+  pip install dbus_next
 else
   echo "Virtual environment already exists."
-fi
+  source "$VENV_DIR/bin/activate"
   pip install --upgrade pip
   pip install --upgrade websockets
   pip install --upgrade dbus_next
+fi
 
 # 3. Check if the Python script exists
 if [ ! -f "$PY_SCRIPT" ]; then
