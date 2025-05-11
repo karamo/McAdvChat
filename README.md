@@ -151,22 +151,24 @@ Was noch fehlt:
 
 ## - “Robuste Echtzeit-Übertragung von Chatnachrichten über fehleranfällige Broadcast-Kanäle mittels Paketfragmentierung, Kompression und Vorwärtsfehlerkorrektur” -
 
-# Disclaimer (oder warum das alles nicht so richtig geht), nach intensiven Forschungen im Mockup
+# Disclaimer (oder warum das alles nicht so richtig geht), nach intensiven Forschungen
+
 - Nachrichten müssen dem APRS Protokoll entsprechen
-        - APRS messages are designed to be ASCII-compatible, typically 7-bit printable ASCII (decimal 33–126)
-        - Control characters (like null \x00, bell \x07, or newline \x0A) and extended 8-bit values (128–255) are not safe
-        - Characters outside this range may cause message corruption
-	- Allowed: A–Z, a–z, 0–9, common punctuation
-	- Not allowed: _binary_data_, _emoji_, _extended_Unicode_
+
+     - APRS messages are designed to be ASCII-compatible, typically 7-bit printable ASCII (decimal 33–126)
+     - Control characters (like null \x00, bell \x07, or newline \x0A) and extended 8-bit values (128–255) are not safe
+     - Characters outside this range may cause message corruption
+     - Allowed: A–Z, a–z, 0–9, common punctuation
+     - Not allowed: _binary_data_, _emoji_, _extended_Unicode_
 
 - MeshCom nutzt UTF-8, mit der Besonderheit dass bei der Übertragung über UDP das JSON doppelt stringified ist
 
 - MeshCom kann unsafe Characters übertragen, besonders wenn ein E22-Node mit unsauberer Spannungsversorgung betrieben wird
- 	- der rohe Byte-Strom kann toxisch sein und sollte dringend mehrere sanitizing Schritte durchlaufen 	
+     - der rohe Byte-Strom kann toxisch sein und sollte dringend mehrere sanitizing Schritte durchlaufen 	
 
 - Kompression bei nur wenigen Bytes bringt leider nur Overhead und keine echte Ersparnis
- 	- Man müsste ein custom Dicitionary für den HAM-Sprech in DACH aufbauen, um die Entropie zu erhöhen
-        - Das Wegschneiden von einem Bit um Base91 effektiv umzusetzen würde wiederum vorausstzen, dass alle 8 Bits genutzt werden können auf der LoRa Strecke
+     - Man müsste ein custom Dicitionary für den HAM-Sprech in DACH aufbauen, um die Entropie zu erhöhen
+     - Das Wegschneiden von einem Bit um Base91 effektiv umzusetzen würde wiederum vorausstzen, dass alle 8 Bits genutzt werden können auf der LoRa Strecke
 
 - Die Kodierung von Binärdaten mit Base64 funktioniert und Übertragung funktioniert ebenso
 
@@ -297,6 +299,5 @@ Referenzen:
 - https://de.wikipedia.org/wiki/Daten%C3%BCbertragung
 - https://files.tapr.org/software_library/aprs/aprsspec/spec/aprs100/APRSProt.pdf
     > for allowed APRS character definition
-
 
 
