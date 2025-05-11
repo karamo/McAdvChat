@@ -146,9 +146,10 @@ Was noch fehlt:
     - systemctrl restart mcproxy
 
 
-# Ausblick / Vision: McAdvChat - der "MeshCom Advanced Chat"
+# Vision: McAdvChat - der "MeshCom Advanced Chat"
+- Was ich eigentlich vor hatte um das Projekt voran zu bringen
 
-# - “Robuste Echtzeit-Übertragung von Chatnachrichten über fehleranfällige Broadcast-Kanäle mittels Paketfragmentierung, Kompression und Vorwärtsfehlerkorrektur” -
+## - “Robuste Echtzeit-Übertragung von Chatnachrichten über fehleranfällige Broadcast-Kanäle mittels Paketfragmentierung, Kompression und Vorwärtsfehlerkorrektur” -
 
 # Disclaimer (oder warum das alles nicht so richtig geht), nach intensiven Forschungen im Mockup
 - Nachrichten müssen dem APRS Protokoll entsprechen
@@ -183,7 +184,7 @@ Was noch fehlt:
 - RS kann Base64 kodiert werden und kommt dann auch mit dem Ausfall von ganzen Chunks zurecht. Aber viele der großen Vorteile werden durch LoRa Protokoll ausgebremst
 
 
-#Zusammenfassung - Idee für eine robustere Version von MeshCom
+## Zusammenfassung - Idee für eine robustere Version von MeshCom
 
 - Diese Projekt-Idee beschreibt ein (browserbasiertes) Übertragungsprotokoll für eine Gruppenkommunikation über einen geteilten Broadcast-Kanal mit hoher Fehlerrate. 
 - Ziel ist es, Textnachrichten gepuffert zu übertragen, wobei jede Nachricht in kleine, robust übertragbare Pakete aufgeteilt wird.
@@ -192,7 +193,7 @@ Was noch fehlt:
 - Optionale, selektive Retransmission einzelner Fragmente erhöht die Robustheit bei Paketverlust.
    - würde voraussetzen, dass Pakete bestätigt werden
 
-###Technische Details zu den Überlegungen vorab, die sich aber nicht erfüllen:
+### Technische Details zu den Überlegungen vorab, die sich aber nicht erfüllen:
 	• Kanalmodell: öffentlich geteiltes Medium, definitiv mit Hidden-Node-Problem weil alles bis zu 4 Hops wiederholt wird, hohe Paketfehlerwahrscheinlichkeit bei steigender Payloadgröße
 	• Nutzdaten-Paketgröße: maximal 149 Byte; Einschränkung auf UTF-8-safe, APRS Kompatibel, JSON-kompatible Zeichen
 	• Chunking: Nachrichten werden in ~10-Byte Payload-Chunks segmentiert
@@ -201,7 +202,7 @@ Was noch fehlt:
 	• Paketstruktur: [Message Header ID|Payload incl. FEC]
 	• Retransmissions: optionale Anforderung von Einzelpaketen bei Erkennung von Lücken im Empfang.
 
-2) Statistischer/technischer Unterbau, ein kurzer Einblick in die wissenschaftlich Seite:
+## 2) Statistischer/technischer Unterbau, ein kurzer Einblick in die wissenschaftlich Seite:
 
 Kanalmodellierung (Paketverlustrate in Abhängigkeit von Payload)
 
@@ -238,7 +239,7 @@ Mit p als Erfolgswahrscheinlichkeit pro Paket und k als Mindestanzahl:
 Das erlaubt gezielte Optimierung von n, k, und r.
 
 
-3) Stand der Forschung (ähnliche Systeme: DVB, DAB, LoRa):
+## 3) Stand der Forschung (ähnliche Systeme: DVB, DAB, LoRa):
 
 Vergleichbare Systeme
 
@@ -251,40 +252,40 @@ Lessons learned
 	• Adaptive Kodierung je nach Kanalbedingungen verbessert Effizienz (nicht getestet)
 	• Selective Acknowledgements (SACK) sind essentiell für hohe Verlässlichkeit bei real-time reassembly.
 
-4) MeshCom
+## 4) MeshCom
 
 Es ist wichtig hier zu betonen, dass wir auf das bestehde MeshCom Protokoll aufsetzen, das wiederum LoRa mit APRS Protokoll als Unterbau hat. LoRaWan selbst bringt Fehlerkorrektur mit sich, sodass Kommunikation mit den aktuellen Kanal Parametern bis ca. SNR -17dB stattfinden kann. Es kommt trotzdem immer wieder zu Übertragungen die verloregn, da die Übertragung nicht sichergestellt ist und wie oben dargestellt potentiell längere Nachrichten eine höhere Fehleranfälligkeit mit vollständigem Verlust haben. Man sieht auch, dass manche LoRa Frames erneut übertragen werden, hierzu ist dem Autor nichts näher dazu bekannt.
 
-5) Verdict, Diskussion und offene Punkte
+## 5) Verdict, Diskussion und offene Punkte
 
 Stärken
-
 	• saubere Idee – mit exakte Grenzen für MeshCom Spec Payload (149 Byte, APRS / JSON-safe).
 	• Echtzeit-fähig, robust und adaptiv - für hohe Kundenzufriedenheit
-	• Praktische, realitätsnahe Annahmen (Fehlerraten, Broadcastmodell). 
+	• Praktische, realitätsnahe Annahmen (Fehlerraten, Broadcastmodell)
  	• Wissenschaftlich hinterlegt, basierend auf bekannten Modellen und Vorgehensweisen, keine sudo Science.
 
-Was noch fehlt / was noch definiert werden muss um die Idee tiefer zu legen
+Schächen
+        • Die Rechnung leider ohne den Zugriff auf die rohen MeshCom LoRa Frames gemacht
 
+Was noch fehlt / was noch definiert werden muss um die Idee tiefer zu legen
 	• Chunk Size Tuning Algorithmus – optimal je nach Kanalgüte - für optimalen Kanaldurchsatz
 	• Verlustmodell / Paket-Scheduling – Wiederholstrategie und Timeouts?
  		- Wir kann in MeshCom die Kanalgüte gemessen werden?
 	• Buffer-Strategie bei Empfang – Wie lange wartet man auf fehlende Pakete? Ab wann reißt der Geduldsfaden
-	• FEC-Typ: XOR ist zu schwach, Raptor noch checken
 	• Kollisionsvermeidung bei gleichzeitigen Sendern? 
- 		- Im ersten Schritt haben wir “kein Hidden Node” angenommen, 
+ 		- Hidden Node ist bei Max Hop Count 4 ein echtes Problem und führt zu massiven Kollisionen, 
    		- Wie könnte man ein Token oder Zeitslot Modell implementieren?
      		- Macht ein Zeitslot Modell überhaupt Sinn, denn wir haben sehr viele LoRa Geräte, die komplett unaware sind
-       		- Müsste als Eingriff in die MeshCom Firmware vermutlich umgesetzt werden ("wird nicht passieren")
+       		- Müsste als Eingriff in die MeshCom Firmware vermutlich umgesetzt werden ("wird nicht passieren, so Kurt OE1KBC")
 	• Security - passiert doch schon am LoRa MeshCom Node (Hamming). Wenn RS zum Einsatz kommt, dann wird dort alles abgesichert
 
 Optionale Erweiterungen
-
 	• Adaptive Redundanz: erhöhe FEC-Anteil bei hohem Paketverlust.
 	• Streaming Preview: Darstellung von “User is typing” + live Fragmentanzeige. Das wäre definitiv die coolste Sache.
 	• UI-Feedback: grün = empfangen, gelb = erwartet, rot = verloren. Muss definitiv mit rein.
 
 Referenzen:
+- privater Austausch mit den Entwicklern im Telegram Chat (kann nicht öffentlich gemacht werden)
 - https://icssw.org/grundlegende-spezifikationen/
 - https://en.wikipedia.org/wiki/Raptor_code
 - https://de.wikipedia.org/wiki/Reed-Solomon-Code
@@ -294,6 +295,8 @@ Referenzen:
 - https://de.wikipedia.org/wiki/Vorw%C3%A4rtsfehlerkorrektur
 - https://de.wikipedia.org/wiki/Kanal_(Informationstheorie)
 - https://de.wikipedia.org/wiki/Daten%C3%BCbertragung
+- https://files.tapr.org/software_library/aprs/aprsspec/spec/aprs100/APRSProt.pdf
+    > for allowed APRS character definition
 
 
 
