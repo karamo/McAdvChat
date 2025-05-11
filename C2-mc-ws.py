@@ -8,7 +8,7 @@ import sys
 import time
 import unicodedata
 from struct import *
-from bleak import BleakScanner, BleakClient
+#from bleak import BleakScanner, BleakClient
 from datetime import datetime, timedelta
 from collections import deque
 
@@ -22,7 +22,7 @@ from dbus_next.errors import DBusError
 from dbus_next.service import ServiceInterface, method
 #from bluezero import constants
 
-VERSION="v0.8.0"
+VERSION="v0.9.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 
 BLUEZ_SERVICE_NAME = "org.bluez"
