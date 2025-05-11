@@ -8,21 +8,18 @@ import sys
 import time
 import unicodedata
 from struct import *
-#from bleak import BleakScanner, BleakClient
 from datetime import datetime, timedelta
 from collections import deque
 
-#import subprocess
-#import threading
 
 from dbus_next import Variant
+from dbus_next import MessageType
 from dbus_next.aio import MessageBus
 from dbus_next.constants import BusType
 from dbus_next.errors import DBusError
 from dbus_next.service import ServiceInterface, method
-#from bluezero import constants
 
-VERSION="v0.9.0"
+VERSION="v0.10.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 
 BLUEZ_SERVICE_NAME = "org.bluez"
@@ -54,6 +51,9 @@ def hours_to_dd_hhmm(hours: int) -> str:
     days = hours // 24
     remainder_hours = hours % 24
     return f"{days:02d} day(s) {remainder_hours:02d}:00h"
+
+def get_current_timestamp() -> str:
+    return datetime.utcnow().isoformat()
 
 def is_allowed_char(ch: str) -> bool:
     codepoint = ord(ch)
@@ -125,8 +125,6 @@ def try_repair_json(text: str) -> dict:
     }
 
 
-def get_current_timestamp() -> str:
-    return datetime.utcnow().isoformat()
 
 def store_message(message: dict, raw: str):
     global message_store_size
@@ -178,7 +176,6 @@ async def udp_listener():
                    print(f"{readabel} {message['src_type']} von {addr[0]} Zeit: {message['msg']} ID:{message['msg_id']} src:{message['src']}")
                    print(f"{readabel} {message['src_type']} von {addr[0]}: {message}")
             else:
-                #store_message(message, json.dumps(message)) #wir wollen mit Timestamp speichern
                 await loop.run_in_executor(None, store_message, message, json.dumps(message))
                     
                 if has_console:
@@ -187,11 +184,8 @@ async def udp_listener():
         async with clients_lock:
                 targets = list(clients)
 
-        #if clients:
         if targets:
-           #send_tasks = [asyncio.ensure_future(client.send(json.dumps(message))) for client in clients]
             send_tasks = [asyncio.create_task(client.send(json.dumps(message))) for client in targets]
-            #await asyncio.gather(*send_tasks, return_exceptions=True)
             await asyncio.gather(*send_tasks, return_exceptions=True)
 
     except asyncio.CancelledError: 
@@ -216,15 +210,12 @@ async def websocket_handler(websocket):
                    await handle_command(data.get("msg"), websocket)
 
                 elif data.get("type") == "BLE":
-                   #await client.send_message(data.get("msg"), data.get("dst"))
                    loop = asyncio.get_running_loop()
                    await loop.run_in_executor(None, client.send_message, data.get("msg"), data.get("dst"))
 
 
                 else:
                    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                   #udp_sock.sendto(json.dumps(data).encode("utf-8"), UDP_TARGET)
-                   # UDP send in Thread auslagern
                    loop = asyncio.get_running_loop()
                    await loop.run_in_executor(None, udp_sock.sendto,
                                               json.dumps(data).encode("utf-8"),
@@ -252,10 +243,9 @@ async def handle_command(msg, websocket):
             "data": raw_list 
         }
 
-        # Step 2: Serialize to JSON
         json_data = json.dumps(payload)
-
         await websocket.send(json_data)
+
         #------------------------------------------------------------------
 
         # Step 3: GZIP-compress
@@ -297,79 +287,7 @@ async def handle_command(msg, websocket):
 def mac_to_dbus_path(mac):
     return f"/org/bluez/hci0/dev_{mac.replace(':', '_')}"
 
-class BLEClient:
-    def __init__(self, mac, read_uuid, write_uuid, hello_bytes=None):
-        self.mac = mac
-        self.read_uuid = read_uuid
-        self.write_uuid = write_uuid
-        self.hello_bytes = hello_bytes or b'\x00'
-        self.path = mac_to_dbus_path(mac)
-        self.bus = None
-        self.device_obj = None
-        self.dev_iface = None
-        self.read_char_iface = None
-        self.read_props_iface = None
-        self.write_char_iface = None
-        self.props_iface = None
-        self._on_value_change_cb = None
-
-    async def connect(self):
-      async with self._connect_lock:
-        if self._connected:
-             print(f"🔁 Verbindung zu {self.mac} besteht bereits (aus Cache)")
-             return
-
-        if self.bus is None:
-           self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-
-        introspection = await self.bus.introspect(BLUEZ_SERVICE_NAME, self.path)
-        self.device_obj = self.bus.get_proxy_object(BLUEZ_SERVICE_NAME, self.path, introspection)
-        self.dev_iface = self.device_obj.get_interface(DEVICE_INTERFACE)
-        self.props_iface = self.device_obj.get_interface(PROPERTIES_INTERFACE)
-
-        #connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
-
-        try:
-           connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
-        except DBusError as e:
-           print(f"⚠️ Fehler beim Abfragen des Verbindungsstatus: {e}")
-           self._connected = False
-           return
-
-        if not connected:
-           try:
-             await self.dev_iface.call_connect()
-             print(f"✅ Neu verbunden mit {self.mac}")
-           except DBusError as e:
-             print(f"⚠️  Connect timeout: {e}")
-             self.bus = None
-             return
-        else:
-           print(f"🔁 Verbindung zu {self.mac} besteht bereits")
-
-        await self._find_characteristics()
-
-        if not self.read_char_iface or not self.write_char_iface:
-            raise Exception("❌ Charakteristika nicht gefunden")
-        
-        self.read_props_iface = self.read_char_obj.get_interface(PROPERTIES_INTERFACE)
-
-        #is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
-        #print("Notifications sind .. ", is_notifying)
-        try:
-          is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
-          print("Notifications sind .. ", is_notifying)
-        except DBusError as e:
-             print(f"⚠️ Fehler beim Abfragen von Notifying: {e}")
-
-        self._connected = True
-
-    async def _find_characteristics(self):
-        self.read_char_obj, self.read_char_iface = await find_gatt_characteristic(
-            self.bus, self.path, self.read_uuid)
-        self.write_char_obj, self.write_char_iface = await find_gatt_characteristic(
-            self.bus, self.path, self.write_uuid)
-    async def find_gatt_characteristic(bus, path, target_uuid):
+async def find_gatt_characteristic(bus, path, target_uuid):
      try:
         introspect = await bus.introspect(BLUEZ_SERVICE_NAME, path)
      except Exception as e:
@@ -397,8 +315,89 @@ class BLEClient:
 
      return None, None
 
+class BLEClient:
+    def __init__(self, mac, read_uuid, write_uuid, hello_bytes=None):
+        self.mac = mac
+        self.read_uuid = read_uuid
+        self.write_uuid = write_uuid
+        self.hello_bytes = hello_bytes or b'\x00'
+        self.path = mac_to_dbus_path(mac)
+        self.bus = None
+        self.device_obj = None
+        self.dev_iface = None
+        self.read_char_iface = None
+        self.read_props_iface = None
+        self.write_char_iface = None
+        self.props_iface = None
+        self._on_value_change_cb = None
+        self._connect_lock = asyncio.Lock()
+        self._connected = False
+
+    async def connect(self):
+      async with self._connect_lock:
+        if self._connected:
+             print(f"🔁 Verbindung zu {self.mac} besteht bereits")
+             return
+
+        if self.bus is None:
+           self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+
+        introspection = await self.bus.introspect(BLUEZ_SERVICE_NAME, self.path)
+        self.device_obj = self.bus.get_proxy_object(BLUEZ_SERVICE_NAME, self.path, introspection)
+        self.dev_iface = self.device_obj.get_interface(DEVICE_INTERFACE)
+        self.props_iface = self.device_obj.get_interface(PROPERTIES_INTERFACE)
+
+        try:
+           connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
+        except DBusError as e:
+           print(f"⚠️ Fehler beim Abfragen des Verbindungsstatus: {e}")
+           self._connected = False
+           return
+
+        if not connected:
+           try:
+             await self.dev_iface.call_connect()
+             print(f"✅ Neu verbunden mit {self.mac}")
+           except DBusError as e:
+             print(f"⚠️  Connect timeout: {e}")
+             self.bus = None
+             return
+        else:
+           print(f"🔁 Verbindung zu {self.mac} besteht bereits")
+
+        await self._find_characteristics()
+
+        if not self.read_char_iface or not self.write_char_iface:
+            raise Exception("❌ Charakteristika nicht gefunden")
+        
+        self.read_props_iface = self.read_char_obj.get_interface(PROPERTIES_INTERFACE)
+
+        try:
+          is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
+          print("Notifications sind .. ", is_notifying)
+        except DBusError as e:
+             print(f"⚠️ Fehler beim Abfragen von Notifying: {e}")
+
+        self._connected = True
+
+
+    async def _find_characteristics(self):
+        self.read_char_obj, self.read_char_iface = await find_gatt_characteristic(
+            self.bus, self.path, self.read_uuid)
+        self.write_char_obj, self.write_char_iface = await find_gatt_characteristic(
+            self.bus, self.path, self.write_uuid)
+
+
     async def start_notify(self, on_change=None):
         print("▶️  Start notify ..")
+
+
+        is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
+        if is_notifying:
+           print("wir haben schon ein notify, also nix wie weg hier")
+           return
+
+
         if not self.bus:
            print("❌ Connection not established, start notify aborted")
            return
@@ -419,13 +418,13 @@ class BLEClient:
         except DBusError as e:
             print(f"⚠️ StartNotify fehlgeschlagen: {e}")
 
-    def _on_props_changed(self, iface, changed, invalidated):
+    async def _on_props_changed(self, iface, changed, invalidated):
       if iface != GATT_CHARACTERISTIC_INTERFACE:
         return
 
       if "Value" in changed:
         new_value = changed["Value"].value
-        notification_handler(new_value)
+        await notification_handler(new_value)
 
         if self._on_value_change_cb:
             self._on_value_change_cb(new_value)
@@ -495,7 +494,6 @@ class BLEClient:
               print(f"💥 Fehler beim Schreiben an BLE: {e}")
         else:
             print("⚠️ Keine Write-Charakteristik verfügbar")
-
 
 
      #https://github.com/karamo/MeshAll42_MIT-AI2/tree/main/MeshCOM_Interna#12-anforderungspakete-aus-der-app-an-die-fw
@@ -655,11 +653,11 @@ class BLEClient:
 
 
     async def disconnect(self):
-        print("⬇️ disconnect ..")
-
         if not self.dev_iface:
+            print("⬇️  not connected - can't disconnect ..")
             return
         try:
+            print("⬇️ disconnect ..")
             await self.stop_notify()
             await self.dev_iface.call_disconnect()
             print(f"🧹 Disconnected von {self.mac}")
@@ -670,6 +668,7 @@ class BLEClient:
         if self.bus:
             self.bus.disconnect()
         self.bus = None
+        self._connected = False
 
     async def ble_info(self):
       if not self.props_iface:
@@ -685,12 +684,14 @@ class BLEClient:
       except Exception as e:
         print(f"❌ Failed to fetch info for {self.props_iface}: {e}")
 
-    async def scan_ble_devices(self, timeout=10.0):
-      print("🔍 Starting native BLE scan via BlueZ... timout =",timeout)
+    async def scan_ble_devices(self, timeout=5.0):
       if self.bus is None:
           self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
       else:
-          print("uups, already connected? Why scan again?")
+          print("❌ already connected, no scanning possible ..")
+          return
+
+      print("🔍 Starting native BLE scan via BlueZ... timout =",timeout)
 
       path = "/org/bluez/hci0"
 
@@ -712,11 +713,13 @@ class BLEClient:
             addr = props.get("Address", Variant("s", "")).value
             rssi = props.get("RSSI", Variant("n", 0)).value
             self.found_devices[path] = (name, addr, rssi)
-            print(f"🔹 {name} | Address: {addr} | RSSI: {rssi}")
+            print(f"🔹 {name} | Address: {addr} | RSSI: {rssi}", end="\r")
+            #print("🔹", end="\r")
 
-            if name.startswith("MC-"):
-                print("✅ Matching device found. Stopping discovery early...")
-                found_mc_event.set()
+            #Dazu müsste man das Callsign kennen, dann kann man spezifisch danach suchen
+            #if name.startswith("MC-"):
+            #    print("✅ Matching device found. Stopping discovery early...")
+            #    found_mc_event.set()
 
       # Subscribe to the signal
       self.obj_mgr = self.bus.get_proxy_object(BLUEZ_SERVICE_NAME, "/", await self.bus.introspect(BLUEZ_SERVICE_NAME, "/"))
@@ -730,7 +733,8 @@ class BLEClient:
         # Warte bis entweder Gerät gefunden oder Timeout abgelaufen
         await asyncio.wait_for(found_mc_event.wait(), timeout)
       except asyncio.TimeoutError:
-        print(f"⏱ Timeout expired after {timeout:.1f}s, no matching device found.")
+        #print(f"⏱ Timeout expired after {timeout:.1f}s, no matching device found.")
+        print("\nBLE scan finished\n")
 
       await self.adapter.call_stop_discovery()
 
@@ -738,8 +742,10 @@ class BLEClient:
       for path, (name, addr, rssi) in self.found_devices.items():
           print(f"🔹 {name} | Address: {addr} | RSSI: {rssi}")
 
-      await self.disconnect()
-      #self.bus.disconnect()
+      await self.close() #keine gute Idee, wir sind wo anders verbunden
+      #if self.bus:
+      #   self.bus.disconnect() #sauber aufräumen
+      #   self.bus = None
 
 
 class NoInputNoOutputAgent(ServiceInterface):
@@ -845,17 +851,21 @@ async def ble_unpair():
 
 
 
-
 async def ble_connect():
-    await client.connect()
-    await client.start_notify()
-    await self.monitor_connection()
-    await client.send_hello()
+    if not client._connected: 
+      await client.connect()
+      await client.start_notify()
+      await client.monitor_connection()
+      await client.send_hello()
+    else:
+      print("can't connect, already connected")
 
 async def ble_disconnect():
-    print("BLE disconnect dummy");
-    await client.disconnect()
-    await client.close()
+    if client._connected: 
+      await client.disconnect()
+      await client.close()
+    else:
+      print("can't disconnect, already disconnected")
 
 async def scan_ble_devices():
     await client.scan_ble_devices()
@@ -864,7 +874,8 @@ async def ble_info():
     await client.ble_info()
 
 
-def notification_handler(clean_msg):
+async def notification_handler(clean_msg):
+    loop = asyncio.get_running_loop()
     # JSON-Nachrichten beginnen mit 'D{'
     if clean_msg.startswith(b'D{'):
 
@@ -889,12 +900,27 @@ def notification_handler(clean_msg):
 
            if typ == 'MH': # MH update
              print("MH",var)
+             #await websocket.send(var)
+             message=var
+
+             output = dispatcher(message)
+             print(json.dumps(output, indent=2))
+
+             await loop.run_in_executor(None, store_message, output, json.dumps(output))
+
+             #Alles an den WebSocket
+             async with clients_lock:
+                targets = list(clients)
+
+             if targets:
+                send_tasks = [asyncio.create_task(client.send(json.dumps(output))) for client in targets]
+                await asyncio.gather(*send_tasks, return_exceptions=True)
 
            elif typ == "SA": # APRS.fi Info
-             print("APRS")
+             print("APRS", var)
 
            elif typ == "G": # GPS Info
-             print("GPS")
+             print("GPS", var)
 
            elif typ == "W": # Wetter Info
              print("Wetter")
@@ -919,7 +945,22 @@ def notification_handler(clean_msg):
 
     # Binärnachrichten beginnen mit '@'
     elif clean_msg.startswith(b'@'):
-      print("bin decode",decode_binary_message(clean_msg))
+      message = decode_binary_message(clean_msg)
+      print("bin decode", message)
+
+      output = dispatcher(message)
+      print(json.dumps(output, indent=2))
+
+      #await websocket.send(message)
+      await loop.run_in_executor(None, store_message, output, json.dumps(output))
+
+      #Alles an den WebSocket
+      async with clients_lock:
+                targets = list(clients)
+
+      if targets:
+                send_tasks = [asyncio.create_task(client.send(json.dumps(output))) for client in targets]
+                await asyncio.gather(*send_tasks, return_exceptions=True)
 
     else:
         print("Unbekannter Nachrichtentyp.")
@@ -1081,6 +1122,107 @@ def load_dump():
             print(f"{len(message_store)} Nachrichten ({message_store_size / 1024:.2f} KB) geladen")
 
 
+
+def hex_msg_id(msg_id):
+    return f"{msg_id:08X}"
+
+def ascii_char(val):
+    return chr(val)
+
+def strip_prefix(msg, prefix=":"):
+    return msg[1:] if msg.startswith(prefix) else msg
+
+def parse_aprs_position(message):
+    # APRS-Position: !4824.46N/01144.31EG...
+    import re
+    match = re.match(r"!(\d{2})(\d{2}\.\d{2})([NS])[/\\](\d{3})(\d{2}\.\d{2})([EW])([A-Za-z])", message)
+    if not match:
+        return None
+    lat_deg, lat_min, lat_dir, lon_deg, lon_min, lon_dir, symbol = match.groups()
+    lat = int(lat_deg) + float(lat_min)/60
+    lon = int(lon_deg) + float(lon_min)/60
+
+    return {
+        "lat": round(lat, 4),
+        "lat_dir": lat_dir,
+        "long": round(lon, 4),
+        "long_dir": lon_dir,
+        "aprs_symbol": symbol,
+        "aprs_symbol_group": "/"
+    }
+
+def timestamp_from_date_time(date, time):
+    dt_str = f"{date} {time}"
+    dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+    return int(dt.timestamp() * 1000)
+
+def transform_common_fields(d):
+    return {
+        "firmware": d.get("fw"),
+        "fw_sub": ascii_char(d.get("fw_subver")),
+        "max_hop": d.get("max_hop"),
+        "mesh_info": d.get("mesh_info"),
+        "node_timestamp": d.get("time_ms"),
+        "timestamp": int(time.time() * 1000),
+        "lora_mod": d.get("lora_mod"),
+        "last_hw": d.get("lasthw")
+    }
+
+def transform_msg(input_dict):
+    return {
+        "src_type": "lora",
+        "type": "msg",
+        "src": input_dict["path"].rstrip(">"),
+        "dst": input_dict["dest"],
+        "msg": strip_prefix(input_dict["message"]),
+        "msg_id": hex_msg_id(input_dict["msg_id"]),
+        "hw_id": input_dict["hardware_id"],
+        **transform_common_fields(input_dict)
+    }
+
+def transform_pos(input_dict):
+    aprs = parse_aprs_position(input_dict["message"]) or {}
+    return {
+        "src_type": "lora",
+        "type": "pos",
+        "src": input_dict["path"].rstrip(">"),
+        "msg": "",
+        "msg_id": hex_msg_id(input_dict["msg_id"]),
+        "hw_id": input_dict["hardware_id"],
+        **aprs,
+        **transform_common_fields(input_dict)
+    }
+
+def transform_mh(input_dict):
+    return {
+        "src_type": "lora",
+        "type": "pos",
+        "src": input_dict["CALL"],
+        "msg": "",
+        "lat": 0,
+        "lat_dir": "",
+        "long": 0,
+        "long_dir": "",
+        "aprs_symbol": "",
+        "hw_id": input_dict["HW"],
+        "rssi": input_dict.get("RSSI"),
+        "snr": input_dict.get("SNR"),
+        "node_timestamp": timestamp_from_date_time(input_dict["DATE"], input_dict["TIME"]),
+        "timestamp": int(time.time() * 1000)
+    }
+
+
+def dispatcher(input_dict):
+    if "TYP" in input_dict:
+        if input_dict["TYP"] == "MH":
+            return transform_mh(input_dict)
+    elif input_dict.get("payload_type") == 58:
+        return transform_msg(input_dict)
+    elif input_dict.get("payload_type") == 33:
+        return transform_pos(input_dict)
+    else:
+        raise ValueError(f"Unbekannter payload_type oder TYP: {input_dict}")
+
 async def main():
     load_dump()
     prune_messages()
@@ -1150,15 +1292,21 @@ if __name__ == "__main__":
     config = load_config()
 
     UDP_PORT_list = config["UDP_PORT_list"]
-#    UDP_PORT_list = 1800
 
     UDP_PORT_send = config["UDP_PORT_send"]
     UDP_TARGET = (config["UDP_TARGET"], UDP_PORT_send)
-#    UDP_TARGET = ("192.168.68.56", UDP_PORT_send)
 
     WS_HOST = config["WS_HOST"]
     WS_PORT = config["WS_PORT"]
-#    WS_PORT = 2960
+
+#DEV 
+    if has_console:
+      print("dev environemt detected")
+      UDP_PORT_list = 1800
+      UDP_TARGET = ("192.168.68.56", UDP_PORT_send)
+      WS_PORT = 2960
+####
+
     print(f"Websockets Host and Port {WS_HOST}:{WS_PORT}")
 
     PRUNE_HOURS = config["PRUNE_HOURS"]
