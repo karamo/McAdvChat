@@ -153,11 +153,11 @@ Was noch fehlt:
 
 # Disclaimer (oder warum das alles nicht so richtig geht), nach intensiven Forschungen im Mockup
 - Nachrichten müssen dem APRS Protokoll entsprechen
- 	• APRS messages are designed to be ASCII-compatible, typically 7-bit printable ASCII (decimal 33–126)
-	• Control characters (like null \x00, bell \x07, or newline \x0A) and extended 8-bit values (128–255) are not safe
-	• Characters outside this range may cause message corruption
-	→ Allowed: A–Z, a–z, 0–9, common punctuation
-	→ Not allowed: _binary_data_, _emoji_, _extended_Unicode_
+        - APRS messages are designed to be ASCII-compatible, typically 7-bit printable ASCII (decimal 33–126)
+        - Control characters (like null \x00, bell \x07, or newline \x0A) and extended 8-bit values (128–255) are not safe
+        - Characters outside this range may cause message corruption
+	- Allowed: A–Z, a–z, 0–9, common punctuation
+	- Not allowed: _binary_data_, _emoji_, _extended_Unicode_
 
 - MeshCom nutzt UTF-8, mit der Besonderheit dass bei der Übertragung über UDP das JSON doppelt stringified ist
 
