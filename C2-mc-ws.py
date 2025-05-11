@@ -1207,6 +1207,8 @@ def transform_mh(input_dict):
         "hw_id": input_dict["HW"],
         "rssi": input_dict.get("RSSI"),
         "snr": input_dict.get("SNR"),
+        "pl": input_dict.get("PL"),
+        "mesh": input_dict.get("MESH"),
         "node_timestamp": timestamp_from_date_time(input_dict["DATE"], input_dict["TIME"]),
         "timestamp": int(time.time() * 1000)
     }
