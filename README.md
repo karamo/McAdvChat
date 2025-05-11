@@ -64,20 +64,27 @@ Mein persönliches MashCom McApp-Projekt zerfällt in zwei Komponenten:
     - Soll als PWA am Telefon Bildschirm abgelegt werden können
     - Soll sowohl am Laptop, wie am iPad als auch am Telefon laufen
     	- Mobile Phone Support derzeit noch eingeschränkt, da hierfür noch das Layout optimiert werden muss
-     - Muss Dark Mode fähig sein
-     - Muss sich an den Bildschirm dynamisch anpassen
+    - Muss Dark Mode fähig sein
+    - Muss sich an den Bildschirm dynamisch anpassen aka responsive design
+    - Muss regelmäßig mit security fixes versorgt werden, da in den Bibliotheken vulnerabilities sein können
        
   - Konnektivität
      - Muss sich mit dem MeshCom Node verbinden können
+     - Muss Zeichen ausfiltern, die nicht dem APRS + UTF-8 Protokoll entsprechen.
+     - Soll fehlertolerant mit Zeichen sein, die man ohne Probleme filtern kann. 
+     - Nachrichten, die sich nicht einfach filtern lassen und illegale Binärdaten enthalten werden hart verworfen, weil es sich um Fehlaussendungen von kaputten E22 Nodes handelt. Es macht keinen Sinn diese anzuzeigen, da sie sowieso Datenmüll enthalten.
      - Muss bei jedem Refresh die Nachrichten vom MeshCom Node neu einlesen
      - Soll sich optional auf MeshCom Activity Seite verbinden können
        
   - Chat View
      - Muss Gruppen und Nutzer filtern können
+     - Spam und illegale Nachrichten wird Grupp 9999 zugeordent, weil diese störne die normale Nachrichtenansicht
+     - Muss das Zeitsignal empfagen und per Watchdog eine Nachricht ausgeben, wenn aus Wien keine Zeitsignal Paket mehr empfangen werden.
      - Muss ein Suchfeld haben, damit jedes beliebige Call oder jeder beliebige Gruppenchat gefiltert werden kann
      - Das Ziel soll sich dynamisch an die ausgewählte Gruppe oder das ausgewählte Call anpassen
-     - Senden Button wird durch dücken von Enter ausgelöst
-     - Messages landen zuerst in einer Sende Queue. Optional: dynamisches Verzögern der Nachrichten
+     - Senden Button wird durch dücken von Enter ausgelöst, (newlines sind in APRS nicht erlaubt)
+     - Messages landen zuerst in einer Sende Queue, damit der MeshCom Node nicht überfordert wird. Sendeverzögerung aktuell 12 Sekunden, was für verlässliche HF Aussendungen teilweise noch zu schnell ist.
+     - Optional: dynamisches Verzögern der Nachrichten, was aber erst mit Bluetoth Zugriff realisiert werden kann, weil wir vom MeshCom Node keine Rückemldung bekommen
      - Anzeige der UDP Messages für einen technischen Look
 
   - Map View
@@ -87,49 +94,56 @@ Mein persönliches MashCom McApp-Projekt zerfällt in zwei Komponenten:
      - Beim Klick auf einen Node wird mehr Info angezeigt
      - Nicht geplant: abrufen von dynamischen Daten zu Temperatur, Luftfeuchte und Luftdruck, sowie die weiteren Sensordaten
 
-  - FT - der File Transfer
+  - FT - der File Transfer / ist in der App enthalten, jedoch nicht freigeschalten, wegen Zurückweisung von OE1KBC
      - Ein File < 1kB kann in die Drop Zone gezogen werden und wird anschließend übertragen
      - Via Gruppe 9 (HF Only)
      - Empfänger wartet passiv auf übertragene Files
      - Empfänger kann verloren gegangene Übertragungen erneut anfordern
      - Übertragungskodierungmit Base91 Zeichensatz
-     - Blöcke werden Reed Solomon kodiert
+     - Blöcke werden Reed Solomon kodiert (ist overkill, weil wir sowieso nicht an die rohen LoRa Pakete kommen)
      - Vor Übertragung wird ein Header mit Meta-Information gesendet, damit klar ist, warum soviel Nachrichten kommen, die nicht menschenlesbar sind
      - könnte auch Bilder übertragen, aber dazu reicht uns aktuell nicht die Bandbreite aus (8 Sekunden TX für 149 Bytes)
      
   - Setup Page 
-     - Muss Gruppen und Nutzer filtern können
+     - Muss Gruppen und PN-Nutzer filtern können
+     - Muss automatisch die Verbindungsdaten zum WebSocket ermitteln 
      - Muss Nutzer und Gruppen löschen können (im Browser, nicht am Server)
-     - Kein "SAVE Settings" Button, muss Input annehmen beim Verlassen der Seite
+     - Kein "SAVE Settings" Button, muss Input speichern beim Verlassen der Seite
 
 - Das Server Backend 
     - Läuft auf einem Raspi Pi Zero 2W, weil der besonders stromsparend ist und mehr als ausreichend ist für unsere Zwecke
     - Erhält über UDP alle Nachrichten vom MeshCom node (--extupip 192... und --extudp on nicht vergessen!)
+    - Muss UTF-8 und APRS Protokoll Checks durchführen, weil es immer wieder illegale Zeichen gibt, die dann zu Abstürzen führen
     - Greift über BLE auf das Device zu, wenn gar nichts mehr geht
-    	- Wird nicht über http auf das MeshCom Device zugreifen, weil wir BLE implementieren werden
+    	- Wird nicht über http auf das MeshCom Device zugreifen, weil BLE implementiert ist
     - Kann Skripts und Webseite über bootstrap skript automatisch aktualisieren
       
 - Use Cases:
     - Chat
-        - mit Bestätigung (für persönliche Chats, aber auch für Gruppenchats)
+        - mit Bestätigung "grüner Haken" (für persönliche Chats, aber auch für Gruppenchats)
         - Look and Feel gemäß aktueller ChatApps, damit die Bedienung einfach ist
+        - "grauer Haken" für Nachrichten, die erfolgreich in Wien auf dem Server angekommen sind, wenn das Web zugeschaltet ist.
     - Map
         - Alle empfangenen POS Meldungen auf ein Karte mit verschiednenen Darstellungsoptionen anzeigen
     - File Transfer
-        - Kann keine Textdokumente übertragen 
+        - Kann Files übertragen, Bilder wären schön
     - Konfigurationsseite: die Config Seite muss entsprechend aktueller Design Guide Lines gestaltet werden
 
-- Optional: mehrere Nodes über UDP und http anbinden
+    - Optional: mehrere Nodes über UDP und http anbinden
+        - man kann auf mehreren Nodes den Raspi als Ziel angeben. Somit ist sichergestellt, dass wenn ein Node etwas überhört, wir die Nachricht vom anderen Node bekommen. 2 sind gut, 3 sind natürlich besser. Am Besten "Antennen Diversity" machen, also die Nodes über den Raum verteilen.
 
 Was noch fehlt:
-- Schön wäre, wenn der UDP Proxy auch noch BLE sprechen lernt und so an mehr Informationen im MeshCom Node kommt
-- mheard RSSI und SNR auslesen und Statistiken erzeugen
-- APRS Icon auf für den Chat verwenden
+- Der UDP Proxy spricht schon BLE aber die WebApp muss hier noch dazulernen
+- mheard RSSI und SNR auslesen und Statistiken erzeugen, kann mit BLE Support kommen
+- APRS Icon auf für den Chat verwenden (gimmick, wird nie richtig laufen ohne Internet Verbindung, da die Info nicht vorliegt)
 - Auslesen von Umweltsensoren, inklusive Dashboard zur Anzeige der Statistiken
+    - Aktuell noch keinen echten UseCase dafür, da man die Umweltsensoren für die Implementierung benötigt
+    - Bräuche dazu erst mal LoRa Pakete, wo diese Infos drin stecken
 - Projekt sollte sich auf einer neuen SD-Karte selbst Bootstrappen mit einem Shellscript
-	- Darauf wird derzeit verzichtet, denn es werden Nutzer-Probleme mit den SSL-Zertifikaten erwartet.
- 	- Es gibt leider keinen einfachen und sauberen Weg gibt mit den SSL-Zertifikaten im Heimnetzwerk.
-- mc-screen.sh wrapper skript durch service ersetzen, das sich über systemctl steuern lässt
+    - Nutzer-Probleme mit den SSL-Zertifikaten sind zu erwarten, kann ein Show-Stopper sein, weil ohne DNS-Auflösung (oder mDNS), wird das nix
+    - Scripten sind vorhanden und beschrieben
+- mc-screen.sh wrapper skript wurde bereits durch service ersetzen, das sich über systemctl steuern lässt
+    - systemctrl restart mcproxy
 
 
 # Ausblick / Vision: McAdvChat - der "MeshCom Advanced Chat"
@@ -137,41 +151,49 @@ Was noch fehlt:
 # - “Robuste Echtzeit-Übertragung von Chatnachrichten über fehleranfällige Broadcast-Kanäle mittels Paketfragmentierung, Kompression und Vorwärtsfehlerkorrektur” -
 
 # Disclaimer (oder warum das alles nicht so richtig geht), nach intensiven Forschungen im Mockup
- - Nachrichten müssen dem APRS Protokoll entsprechen
+- Nachrichten müssen dem APRS Protokoll entsprechen
  	• APRS messages are designed to be ASCII-compatible, typically 7-bit printable ASCII (decimal 33–126)
 	• Control characters (like null \x00, bell \x07, or newline \x0A) and extended 8-bit values (128–255) are not safe
 	• Characters outside this range may cause message corruption
 	→ Allowed: A–Z, a–z, 0–9, common punctuation
 	→ Not allowed: _binary_data_, _emoji_, _extended_Unicode_
 
- - MeshCom nutzt UTF-8, mit der Besonderheit dass bei der Übertragung über UDP das JSON doppelt stringified ist
- - MeshCom kann unsafe Characters übertragen, besonders wenn ein E22-Node mit unsauberer Spannungsversorgung betrieben wird
- 	- der rohe Byte-Strom kann also toxisch sein und sollte dringend mehrere Sanitizing Schritte durchlaufen 	
+- MeshCom nutzt UTF-8, mit der Besonderheit dass bei der Übertragung über UDP das JSON doppelt stringified ist
 
- - Kompression bei nur wenigen Bytes bringt leider nur Overhead und keine echte Ersparnis
+- MeshCom kann unsafe Characters übertragen, besonders wenn ein E22-Node mit unsauberer Spannungsversorgung betrieben wird
+ 	- der rohe Byte-Strom kann toxisch sein und sollte dringend mehrere sanitizing Schritte durchlaufen 	
+
+- Kompression bei nur wenigen Bytes bringt leider nur Overhead und keine echte Ersparnis
  	- Man müsste ein custom Dicitionary für den HAM-Sprech in DACH aufbauen, um die Entropie zu erhöhen
- - Das Wegschneiden von einem Bit um Base91 effektiv umzusetzen würde wiederum vorausstzen, dass alle 8 Bits genutzt werden können auf der LoRaWAN Strecke
- - Die Kodierung von Binärdaten mit Base64 funktioniert und Übertragung funktioniert
- - Reed Solomon (RS) ist lauffähig, würde bei Übertragbarkeit von Binärdaten und Empfang von fehlerbehafteten Paketen sehr viele Vorteile gegenüber der sehr einfachen Hamming Codierung in LoRaWAN bringen
- - RS setzt auf Blöcke mit fixer Größe, wir können also lange Narichten in kurze Chungs, die als Burst ausgesendet werden, verpacken
- - RS geht davon aus, dass einzelne Bits einer Übertragung umfallen. Dies fängt aber schon der MeshCom Node mit Hamming ab, jedoch bei weitem nicht so Robust und fehlertolerant
- - MeshCom verwirft LoRa Pakete mit Bitfehlern. Daher kann uns hier RS nicht helfen das Paket wiederherzustellen
- - Mit Interleaving kann der Verlust von ein oder zwei Chunks, bei Übertragung von mehreren Chunks aufgefangen werden
- 	- Der Overhead ist immens und daher ist ein erneutes Anfordern des Pakets wesentlich effektiver 
- - RS kann Base64 kodiert werden und kommt dann auch mit dem Ausfall von ganzen Chunks zurecht. Aber viele der großen Vorteile werden durch LoRaWAN Protokoll ausgebremst
+        - Das Wegschneiden von einem Bit um Base91 effektiv umzusetzen würde wiederum vorausstzen, dass alle 8 Bits genutzt werden können auf der LoRa Strecke
+
+- Die Kodierung von Binärdaten mit Base64 funktioniert und Übertragung funktioniert ebenso
+
+- Reed Solomon (RS) ist lauffähig, würde bei Übertragbarkeit von Binärdaten und Empfang von fehlerbehafteten Paketen sehr viele Vorteile gegenüber der sehr einfachen Hamming Codierung in LoRa bringen. Es fehlt aber der Zugriff auf rohe Pakete, die keine gültige CRC haben.
+
+- RS setzt auf Blöcke mit fixer Größe, wir können also lange Narichten in kurze Chunks, die als Burst ausgesendet werden, verpacken
+     - das würde enorme Vorteile bringen, da Messages >70 Zeichen kaum erfolgreich übertragen werden können.
+
+- RS geht davon aus, dass einzelne Bits einer Übertragung umfallen. Dies fängt aber schon der MeshCom Node mit Hamming ab, jedoch bei weitem nicht so Robust und fehlertolerant
+     - MeshCom verwirft LoRa Pakete mit Bitfehlern. Daher kann uns hier RS nicht helfen das Paket wiederherzustellen
+
+- Mit Interleaving kann der Verlust von ein oder zwei Chunks, bei Übertragung von mehreren Chunks aufgefangen werden
+     - Der Overhead ist immens und daher ist ein erneutes Anfordern des Pakets wesentlich effektiver 
+
+- RS kann Base64 kodiert werden und kommt dann auch mit dem Ausfall von ganzen Chunks zurecht. Aber viele der großen Vorteile werden durch LoRa Protokoll ausgebremst
 
 
-Zusammenfassung - Idee für eine robustere Version von MeshCom
+#Zusammenfassung - Idee für eine robustere Version von MeshCom
 
 - Diese Projekt-Idee beschreibt ein (browserbasiertes) Übertragungsprotokoll für eine Gruppenkommunikation über einen geteilten Broadcast-Kanal mit hoher Fehlerrate. 
-- Ziel ist es, Textnachrichten in Echtzeit zu übertragen, wobei jede Nachricht in kleine, robust übertragbare Pakete aufgeteilt wird.
+- Ziel ist es, Textnachrichten gepuffert zu übertragen, wobei jede Nachricht in kleine, robust übertragbare Pakete aufgeteilt wird.
 - Die Nachrichten werden komprimiert, mit Vorwärtsfehlerkorrektur (FEC) versehen und in kleinen, JSON-sicheren Fragmenten (max. 149 Byte pro Paket) gesendet.
-- Auf einen Nachrichtendigest (MD5) wird zur Verifikation wird verzeichtet, denn dies stell der MeshCom Node schon bereit.
+- Auf einen Nachrichtendigest (MD5) wird zur Verifikation wird verzeichtet, denn dies stell der MeshCom Node schon bereit. Und Reed-Solomon inkludiert dies schon
 - Optionale, selektive Retransmission einzelner Fragmente erhöht die Robustheit bei Paketverlust.
+   - würde voraussetzen, dass Pakete bestätigt werden
 
-Technische Details
-
-	• Kanalmodell: öffentlich geteiltes Medium, vorerst kein Hidden-Node-Problem, hohe Paketfehlerwahrscheinlichkeit bei steigender Payloadgröße
+###Technische Details zu den Überlegungen vorab, die sich aber nicht erfüllen:
+	• Kanalmodell: öffentlich geteiltes Medium, definitiv mit Hidden-Node-Problem weil alles bis zu 4 Hops wiederholt wird, hohe Paketfehlerwahrscheinlichkeit bei steigender Payloadgröße
 	• Nutzdaten-Paketgröße: maximal 149 Byte; Einschränkung auf UTF-8-safe, APRS Kompatibel, JSON-kompatible Zeichen
 	• Chunking: Nachrichten werden in ~10-Byte Payload-Chunks segmentiert
 	• Kompression: Realtime-kompatible verlustfreie Kompression (z. B. deflate).
@@ -197,7 +219,7 @@ Diese empirische Modellierung erlaubt uns, die optimale Chunkgröße zu bestimme
 FEC-Verfahren: 
 
 Es wird auf etablierte Verfahren wie zum Beispiel Reed-Solomon (für blockbasierte Übertragung) zurückgegriffen. 
-	✅ Reed-Solomon ist robuster als Hamming Code in LoRaWAN
+	• Reed-Solomon ist robuster als Hamming Code in LoRa
 	• kann mehrere Fehler pro Block korrigieren
 	• sowohl verteilte als auch gebündelte Fehler verarbeiten kann
 	• verlustbehaftete Kanäle wie LoRa oder UDP besser absichert
@@ -216,13 +238,13 @@ Mit p als Erfolgswahrscheinlichkeit pro Paket und k als Mindestanzahl:
 Das erlaubt gezielte Optimierung von n, k, und r.
 
 
-3) Stand der Forschung (ähnliche Systeme: DVB, DAB, LoRaWAN):
+3) Stand der Forschung (ähnliche Systeme: DVB, DAB, LoRa):
 
 Vergleichbare Systeme
 
 	• DVB-S2: Verwendet LDPC + BCH für FEC, mit sehr hohen Redundanzgraden in schlechten Kanälen.
 	• DAB+ (Digital Audio Broadcast): Reed-Solomon auf Applikationsebene, Zeitdiversität.
-	• LoRaWAN: Adaptive Data Rate, kleine Pakete, starke FEC mit Hamming/FEC(4,5).
+	• LoRa: Adaptive Data Rate, kleine Pakete, starke FEC mit Hamming/FEC(4,5).
 
 Lessons learned
 	• FEC + Interleaving + Fragmentierung sind zentrale Säulen
@@ -231,7 +253,7 @@ Lessons learned
 
 4) MeshCom
 
-Es ist wichtig hier zu betonen, dass wir auf das bestehde MeshCom Protokoll aufsetzen, das wiederum LoRaWAN mit APRS Protokoll als Unterbau hat. LoRaWan selbst bringt Fehlerkorrektur mit sich, sodass Kommunikation mit den aktuellen Kanal Parametern bis ca. SNR -17dB stattfinden kann. Es kommt trotzdem immer wieder zu Übertragungen die verloregn, da die Übertragung nicht sichergestellt ist und wie oben dargestellt potentiell längere Nachrichten eine höhere Fehleranfälligkeit mit vollständigem Verlust haben. Man sieht auch, dass manche LoRa Frames erneut übertragen werden, hierzu ist dem Autor nichts näher dazu bekannt.
+Es ist wichtig hier zu betonen, dass wir auf das bestehde MeshCom Protokoll aufsetzen, das wiederum LoRa mit APRS Protokoll als Unterbau hat. LoRaWan selbst bringt Fehlerkorrektur mit sich, sodass Kommunikation mit den aktuellen Kanal Parametern bis ca. SNR -17dB stattfinden kann. Es kommt trotzdem immer wieder zu Übertragungen die verloregn, da die Übertragung nicht sichergestellt ist und wie oben dargestellt potentiell längere Nachrichten eine höhere Fehleranfälligkeit mit vollständigem Verlust haben. Man sieht auch, dass manche LoRa Frames erneut übertragen werden, hierzu ist dem Autor nichts näher dazu bekannt.
 
 5) Verdict, Diskussion und offene Punkte
 
@@ -275,8 +297,3 @@ Referenzen:
 
 
 
-
-
-
-
- 
