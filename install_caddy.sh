@@ -236,6 +236,8 @@ else
   echo "🛠️ Patching $lighttpd_conf with rule..."
 
   sudo tee -a "$lighttpd_conf" > /dev/null <<EOF
+
+#prevent caching of version.txt
 \$HTTP["url"] =~ "^/version\.txt$" {
     set-response-header = (
         "Cache-Control" => "no-store, no-cache, must-revalidate, proxy-revalidate",
