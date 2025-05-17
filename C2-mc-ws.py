@@ -62,7 +62,7 @@ def is_allowed_char(ch: str) -> bool:
     if ch in "äöüÄÖÜßäàáâãåāéèêëėîïíīìôòóõōûùúūÀÁÂÃÅĀÉÈÊËĖÎÏÍĪÌÔÒÓÕŌÜÛÙÚŪśšŚŠÿçćčñń":
         return True
 
-    if ch in "⁰"
+    if ch in "⁰":
         return True
 
     #we allow newline, but officially this isn't allowed in APRS messages, so it's a scripting mistake, that should be corrected
@@ -84,6 +84,7 @@ def is_allowed_char(ch: str) -> bool:
     # Reject surrogates, noncharacters
     if 0xD800 <= codepoint <= 0xDFFF:
         return False
+
     if codepoint & 0xFFFF in [0xFFFE, 0xFFFF]:
         return False
     
@@ -213,8 +214,9 @@ async def websocket_handler(websocket):
                    await handle_command(data.get("msg"), websocket)
 
                 elif data.get("type") == "BLE":
-                   loop = asyncio.get_running_loop()
-                   await loop.run_in_executor(None, client.send_message, data.get("msg"), data.get("dst"))
+                   #loop = asyncio.get_running_loop()
+                   #await loop.run_in_executor(None, client.send_message, data.get("msg"), data.get("dst"))
+                   await client.send_message(data.get("msg"), data.get("dst"))
 
 
                 else:
@@ -339,7 +341,8 @@ class BLEClient:
     async def connect(self):
       async with self._connect_lock:
         if self._connected:
-             print(f"🔁 Verbindung zu {self.mac} besteht bereits")
+             if has_console:
+                print(f"🔁 Verbindung zu {self.mac} besteht bereits")
              return
 
         if self.bus is None:
@@ -377,11 +380,15 @@ class BLEClient:
 
         try:
           is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
-          print("Notifications sind .. ", is_notifying)
+          if has_console:
+             print("Notifications sind .. ", is_notifying)
         except DBusError as e:
              print(f"⚠️ Fehler beim Abfragen von Notifying: {e}")
 
         self._connected = True
+        msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'connect BLE result', 'result': 'ok' }
+        await ws_send(msg)
+        print("zeile 390",msg) 
 
 
     async def _find_characteristics(self):
@@ -392,12 +399,14 @@ class BLEClient:
 
 
     async def start_notify(self, on_change=None):
-        print("▶️  Start notify ..")
+        if has_console:
+           print("▶️  Start notify ..")
 
 
         is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
         if is_notifying:
-           print("wir haben schon ein notify, also nix wie weg hier")
+           if has_console:
+              print("wir haben schon ein notify, also nix wie weg hier")
            return
 
 
@@ -417,7 +426,8 @@ class BLEClient:
 
             is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
 
-            print(f"📡 Notify gestartet, Status: {is_notifying}")
+            if has_console:
+               print(f"📡 Notify gestartet, Status: {is_notifying}")
         except DBusError as e:
             print(f"⚠️ StartNotify fehlgeschlagen: {e}")
 
@@ -445,7 +455,8 @@ class BLEClient:
             print("🛑 Notify gestoppt")
         except DBusError as e:
             if "No notify session started" in str(e):
-                print("ℹ️ Keine Notify-Session – ignoriert")
+                if has_console:
+                   print("ℹ️ Keine Notify-Session – ignoriert")
             else:
                 raise
 
@@ -463,12 +474,15 @@ class BLEClient:
 
         if self.write_char_iface:
             await self.write_char_iface.call_write_value(self.hello_bytes, {})
-            print(f"📨 Hello sent ..")
+            if has_console:
+               print(f"📨 Hello sent ..")
 
         else:
             print("⚠️ Keine Write-Charakteristik verfügbar")
 
     async def send_message(self, msg, grp):
+        #print("debug",msg,grp)
+
         if not self.bus:
            print("🛑 connection not established, can't send ..")
            return
@@ -490,7 +504,8 @@ class BLEClient:
         if self.write_char_iface:
             try:
               await asyncio.wait_for(self.write_char_iface.call_write_value(byte_array, {}), timeout=5)
-              print(f"📨 Message sent .. {byte_array}")
+              #if has_console:
+              #   print(f"📨 Message sent .. {byte_array}")
             except asyncio.TimeoutError:
               print("🕓 Timeout beim Schreiben an BLE-Device")
             except Exception as e:
@@ -521,12 +536,15 @@ class BLEClient:
         if not connected:
             print("🛑 connection lost, can't send ..")
             await self.disconnect() #aufräumen, vielleicht hilft es etwas
-            print("debug: disconnect ..")
+            if has_console:
+               print("debug: disconnect ..")
             await self.close() #aufräumen, vielleicht hilft es etwas
-            print("debug: close ..")
+            if has_console:
+               print("debug: close ..")
             return
 
-        #print(f"✅ ready to send")
+        if has_console:
+          print(f"✅ ready to send")
 
         byte_array = bytearray(cmd.encode('utf-8'))
 
@@ -536,7 +554,8 @@ class BLEClient:
 
         if self.write_char_iface:
             await self.write_char_iface.call_write_value(byte_array, {})
-            print(f"📨 Message sent .. {byte_array}")
+            if has_console:
+               print(f"📨 Message sent .. {byte_array}")
 
         else:
             print("⚠️ Keine Write-Charakteristik verfügbar")
@@ -556,19 +575,25 @@ class BLEClient:
        if not connected:
             print("🛑 connection lost, can't send ..")
             await self.disconnect() #aufräumen, vielleicht hilft es etwas
-            print("debug: disconnect ..")
+            if has_console:
+               print("debug: disconnect ..")
+
             await self.close() #aufräumen, vielleicht hilft es etwas
-            print("debug: close ..")
+            if has_console:
+               print("debug: close ..")
             return
 
-       print(f"✅ ready to send")
+       if has_console:
+          print(f"✅ ready to send")
+
        #ID = 0x20 Timestamp from phone [4B]
        if cmd == "--settime":
          cmd_byte = bytes([0x20])
 
          time_str=get_current_timestamp()
          time_str=time_str.replace("T", " ").split(".")[0]
-         print(f"Aktuelle Zeit {time_str}")
+         if has_console:
+            print(f"Aktuelle Zeit {time_str}")
 
          byte_array = bytearray(time_str.encode('utf-8'))
 
@@ -577,7 +602,8 @@ class BLEClient:
 
          if self.write_char_iface:
             await self.write_char_iface.call_write_value(byte_array, {})
-            print(f"📨 Message sent .. {byte_array}")
+            if has_console:
+               print(f"📨 Message sent .. {byte_array}")
 
          else:
             print("⚠️ Keine Write-Charakteristik verfügbar")
@@ -622,7 +648,8 @@ class BLEClient:
        #     save_flag is 0x0A for save and 0x0B for don't save
        #(Aus Z.365ff https://github.com/icssw-org/MeshCom-Firmware/blob/oe1kfr_434q/src/phone_commands.cpp)
        
-       print(f"alles zusammen und raus damit {cmd_byte} {laenge}")
+       if has_console:
+          print(f"alles zusammen und raus damit {cmd_byte} {laenge}")
 
     async def monitor_connection(self):
         if not self.bus:
@@ -652,7 +679,8 @@ class BLEClient:
                     # evtl. neu verbinden oder clean-up triggern
 
         self.bus.add_message_handler(handle_properties_changed)
-        print(f"👂 Überwache BLE-Verbindung zu {self.mac}")
+        if has_console:
+           print(f"👂 Überwache BLE-Verbindung zu {self.mac}")
 
 
     async def disconnect(self):
@@ -663,9 +691,12 @@ class BLEClient:
             print("⬇️ disconnect ..")
             await self.stop_notify()
             await self.dev_iface.call_disconnect()
-            print(f"🧹 Disconnected von {self.mac}")
+            msg="{ src_type: 'BLE', TYP: 'blueZ', command: 'disconnect BLE result', result: 'ok'}"
+            await ws_send(msg)
+            print(f"🧹 Disconnected von {self.mac}",msg)
         except DBusError as e:
-            print(f"⚠️ Disconnect fehlgeschlagen: {e}")
+            msg="{ src_type: 'BLE', TYP: 'blueZ', command: 'disconnect BLE result', result: 'error'}"
+            print(f"⚠️ Disconnect fehlgeschlagen: {e}",msg)
 
     async def close(self):
         if self.bus:
@@ -757,7 +788,8 @@ class NoInputNoOutputAgent(ServiceInterface):
 
     @method()
     def Release(self):
-        print("Agent released")
+        if has_console:
+           print("Agent released")
 
     @method()
     def RequestPasskey(self, device: 'o') -> 'u':
@@ -837,7 +869,8 @@ async def ble_pair():
 
 async def ble_unpair():
     mac="D4:D4:DA:9E:B5:62"
-    print(f"🧹 Unpairing {mac} using blueZ ...")
+    if has_console:
+       print(f"🧹 Unpairing {mac} using blueZ ...")
 
     device_path = mac_to_dbus_path(mac)
     adapter_path = "/org/bluez/hci0"
@@ -861,14 +894,16 @@ async def ble_connect():
       await client.monitor_connection()
       await client.send_hello()
     else:
-      print("can't connect, already connected")
+      if has_console:
+         print("can't connect, already connected")
 
 async def ble_disconnect():
     if client._connected: 
       await client.disconnect()
       await client.close()
     else:
-      print("can't disconnect, already disconnected")
+      if has_console:
+         print("can't disconnect, already disconnected")
 
 async def scan_ble_devices():
     await client.scan_ble_devices()
@@ -876,9 +911,27 @@ async def scan_ble_devices():
 async def ble_info():
     await client.ble_info()
 
+async def ws_send_json(message):
+             output = dispatcher(message)
+             print(json.dumps(output, indent=2))
+             await ws_send(output)
+
+async def ws_send(output):
+             loop = asyncio.get_running_loop()
+             await loop.run_in_executor(None, store_message, output, json.dumps(output))
+
+             #Alles an den WebSocket
+             async with clients_lock:
+                targets = list(clients)
+
+             if targets:
+                send_tasks = [asyncio.create_task(client.send(json.dumps(output))) for client in targets]
+                await asyncio.gather(*send_tasks, return_exceptions=True)
+
+
 
 async def notification_handler(clean_msg):
-    loop = asyncio.get_running_loop()
+    #loop = asyncio.get_running_loop()
     # JSON-Nachrichten beginnen mit 'D{'
     if clean_msg.startswith(b'D{'):
 
@@ -899,49 +952,41 @@ async def notification_handler(clean_msg):
          try:
            typ = var.get('TYP')
 
-           print("type_map",typ_mapping.get(var.get('TYP'), var))
+           #print("type_map",typ_mapping.get(var.get('TYP'), var))
 
            if typ == 'MH': # MH update
-             print("MH",var)
-             #await websocket.send(var)
-             message=var
-
-             output = dispatcher(message)
-             print(json.dumps(output, indent=2))
-
-             await loop.run_in_executor(None, store_message, output, json.dumps(output))
-
-             #Alles an den WebSocket
-             async with clients_lock:
-                targets = list(clients)
-
-             if targets:
-                send_tasks = [asyncio.create_task(client.send(json.dumps(output))) for client in targets]
-                await asyncio.gather(*send_tasks, return_exceptions=True)
+             #print("MH",var)
+             await ws_send_json(var)
 
            elif typ == "SA": # APRS.fi Info
              print("APRS", var)
+             await ws_send_json(var)
 
            elif typ == "G": # GPS Info
              print("GPS", var)
+             await ws_send_json(var)
 
            elif typ == "W": # Wetter Info
-             print("Wetter")
+             print("Wetter", var)
+             await ws_send_json(var)
 
-           elif typ == "SN": # System Settings wie Buttung 
-             print("System Settings")
+           elif typ == "SN": # System Settings 
+             #print("System Settings", var)
+             await ws_send_json(var)
 
-           elif typ == "SE": # System Settings wie Buttung 
-             print("Druck und Co Sensoren")
+           elif typ == "SE": # System Settings
+             print("Druck und Co Sensoren",var)
+             #await ws_send_json(var)
 
            elif typ == "SW": # WIFI + IP Settings
              print("Wifi Settings")
 
            elif typ == "I": # Info Seite
              print("Info Seite", var)
+             await ws_send_json(var)
 
            elif typ == "CONFFIN": # Habe Fertig! Mehr gibt es nicht
-             print("Habe fertig")
+             print("Habe fertig",var)
 
          except KeyError:
              print(error,var) 
@@ -949,21 +994,9 @@ async def notification_handler(clean_msg):
     # Binärnachrichten beginnen mit '@'
     elif clean_msg.startswith(b'@'):
       message = decode_binary_message(clean_msg)
-      print("bin decode", message)
-
-      output = dispatcher(message)
-      print(json.dumps(output, indent=2))
-
-      #await websocket.send(message)
-      await loop.run_in_executor(None, store_message, output, json.dumps(output))
-
-      #Alles an den WebSocket
-      async with clients_lock:
-                targets = list(clients)
-
-      if targets:
-                send_tasks = [asyncio.create_task(client.send(json.dumps(output))) for client in targets]
-                await asyncio.gather(*send_tasks, return_exceptions=True)
+      #if has_console:
+      #   print("bin decode", message)
+      await ws_send_json(message)
 
     else:
         print("Unbekannter Nachrichtentyp.")
@@ -1005,7 +1038,7 @@ def decode_binary_message(byte_msg):
 
     remaining_msg = byte_msg[7:].rstrip(b'\x00')  # Alles nach Hop
 
-    if byte_msg[:2] == b'@A':  # Prüfen, ob es sich umACK Frames handel
+    if byte_msg[:2] == b'@A':  # Prüfen, ob es sich um ACK Frames handelt
 
        #remaining_msg = byte_msg[8:].rstrip(b'\x00')  # Alles nach Hop
        message = remaining_msg.hex().upper()
@@ -1183,6 +1216,16 @@ def transform_msg(input_dict):
         **transform_common_fields(input_dict)
     }
 
+def transform_ack(input_dict):
+    return {
+       "src_type": "lora",
+       "type": "ack",
+       "msg_id": hex_msg_id(input_dict["msg_id"]),
+       "msg": input_dict["message"],
+       "ack_id": hex_msg_id(input_dict["ack_id"]),
+       "timestamp": int(time.time() * 1000)
+    } 
+
 def transform_pos(input_dict):
     aprs = parse_aprs_position(input_dict["message"]) or {}
     return {
@@ -1216,17 +1259,49 @@ def transform_mh(input_dict):
         "timestamp": int(time.time() * 1000)
     }
 
+def transform_ble(input_dict):
+    return{
+        "src_type": "BLE",
+         **input_dict,
+        "timestamp": int(time.time() * 1000)
+     }
+
 
 def dispatcher(input_dict):
     if "TYP" in input_dict:
         if input_dict["TYP"] == "MH":
             return transform_mh(input_dict)
+        if input_dict["TYP"] == "I":
+            print("Type I")
+            return transform_ble(input_dict)
+        if input_dict["TYP"] == "SN":
+            print("Type SN")
+            return transform_ble(input_dict)
+        if input_dict["TYP"] == "G":
+            print("Type G")
+            return transform_ble(input_dict)
+        if input_dict["TYP"] == "SA":
+            print("Type SA")
+            return transform_ble(input_dict)
+        if input_dict["TYP"] == "G":
+            print("Type G")
+            return transform_ble(input_dict)
+        if input_dict["TYP"] == "W":
+            print("Type W")
+            return transform_ble(input_dict)
+
     elif input_dict.get("payload_type") == 58:
         return transform_msg(input_dict)
+
     elif input_dict.get("payload_type") == 33:
         return transform_pos(input_dict)
+
+    elif input_dict.get("payload_type") == 65:
+        return transform_ack(input_dict)
+
     else:
-        raise ValueError(f"Unbekannter payload_type oder TYP: {input_dict}")
+        #raise ValueError(f"Unbekannter payload_type oder TYP: {input_dict}")
+        print(f"Unbekannter payload_type oder TYP: {input_dict}")
 
 async def main():
     load_dump()
