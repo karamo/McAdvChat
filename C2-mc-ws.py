@@ -19,7 +19,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.11.0"
+VERSION="v0.12.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 
 BLUEZ_SERVICE_NAME = "org.bluez"
@@ -60,6 +60,9 @@ def is_allowed_char(ch: str) -> bool:
 
     # Explicit whitelist European Umlaut
     if ch in "äöüÄÖÜßäàáâãåāéèêëėîïíīìôòóõōûùúūÀÁÂÃÅĀÉÈÊËĖÎÏÍĪÌÔÒÓÕŌÜÛÙÚŪśšŚŠÿçćčñń":
+        return True
+
+    if ch in "⁰"
         return True
 
     #we allow newline, but officially this isn't allowed in APRS messages, so it's a scripting mistake, that should be corrected
