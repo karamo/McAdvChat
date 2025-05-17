@@ -221,12 +221,35 @@ else
     "^/webapp/(.*)" => "/webapp/index.html"
   )
 }
+  echo "✅ Patch applied to $lighttpd_conf"
+EOF
+fi
+
+marker='prevent caching of version.txt'
+
+echo "🔍 Checking if $marker rewrite rule is present in $lighttpd_conf..."
+
+if grep -q "$marker" "$lighttpd_conf"; then
+  echo "✅ Rule for already present. Skipping patch."
+else
+  echo "enabling no cache rule for version.txt for lighttpd"
+  echo "🛠️ Patching $lighttpd_conf with rule..."
+
+  sudo tee -a "$lighttpd_conf" > /dev/null <<EOF
+\$HTTP["url"] =~ "^/version\.txt$" {
+    set-response-header = (
+        "Cache-Control" => "no-store, no-cache, must-revalidate, proxy-revalidate",
+        "Pragma" => "no-cache",
+        "Expires" => "0"
+    )
+}
 EOF
 
   echo "✅ Patch applied to $lighttpd_conf"
-  echo "🔁 Restarting lighttpd..."
-  sudo systemctl restart lighttpd
 fi
+
+echo "🔁 Restarting lighttpd..."
+sudo systemctl restart lighttpd
 
 echo "🎉 Base Install of System Components complete."
 echo "now execute:"
