@@ -691,11 +691,12 @@ class BLEClient:
             print("⬇️ disconnect ..")
             await self.stop_notify()
             await self.dev_iface.call_disconnect()
-            msg="{ src_type: 'BLE', TYP: 'blueZ', command: 'disconnect BLE result', result: 'ok'}"
+            msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'disconnect BLE result', 'result': 'ok'}
             await ws_send(msg)
             print(f"🧹 Disconnected von {self.mac}",msg)
         except DBusError as e:
-            msg="{ src_type: 'BLE', TYP: 'blueZ', command: 'disconnect BLE result', result: 'error'}"
+            msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'disconnect BLE result', 'result': 'error'}
+            await ws_send(msg)
             print(f"⚠️ Disconnect fehlgeschlagen: {e}",msg)
 
     async def close(self):
@@ -707,6 +708,8 @@ class BLEClient:
     async def ble_info(self):
       if not self.props_iface:
           print("⚠️  not connected, can't ask for info")
+          msg="{ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'BLE info result', 'result': 'error'}"
+          await ws_send(msg)
           return
 
       try:
