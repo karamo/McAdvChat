@@ -19,7 +19,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.12.0"
+VERSION="v0.13.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 
 BLUEZ_SERVICE_NAME = "org.bluez"
