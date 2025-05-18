@@ -481,8 +481,8 @@ class BLEClient:
     async def send_hello(self):
         if not self.bus:
            print("🛑 connection not established, can't send hello ..")
-           msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'send_hello result', 'result': 'error', 'msg': "connection not established, can't send" }
-           await ws_send(msg)
+           #msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'send_hello result', 'result': 'error', 'msg': "connection not established, can't send" }
+           #await ws_send(msg)
            return
 
         connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
@@ -776,6 +776,8 @@ class BLEClient:
           self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
       else:
           print("❌ already connected, no scanning possible ..")
+          msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'scan BLE result', 'result': 'error', 'msg': "already connected, no scanning possible"}
+          await ws_send(msg)
           return
 
       print("🔍 Starting native BLE scan via BlueZ... timout =",timeout)
@@ -846,7 +848,7 @@ class BLEClient:
       for path, (name, addr, rssi) in self.found_devices.items():
           print(f"🔹 {name} | Address: {addr} | RSSI: {rssi}")
 
-      self.found_devices["TYP"] = "blueZunKNown"
+      self.found_devices["TYP"] = "blueZunKnown"
       msg=transform_ble(self._normalize_variant(self.found_devices))
       await ws_send(msg)
 
@@ -917,7 +919,7 @@ async def ble_pair():
         dev_iface = dev_obj.get_interface(DEVICE_INTERFACE)
     except InterfaceNotFoundError as e:
         print("❌ Error, device not found!")
-        msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'BLE pair result', 'result': 'error', 'mac': mac}
+        msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'BLE pair result', 'result': 'error', 'msg': "device not found", 'mac': mac}
         await ws_send(msg)
         return
 
