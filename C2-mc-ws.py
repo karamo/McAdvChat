@@ -211,13 +211,13 @@ async def websocket_handler(websocket):
                    print(f"WebSocket empfangen: {data}")
 
                 if data.get("type") == "command":
-                   await handle_command(data.get("msg"), websocket)
+                   print("Line 214:", data.get("msg"), data.get("MAC"), data.get("BLE_Pin"))
+                   await handle_command(data.get("msg"), websocket, data.get("MAC"), data.get("BLE_Pin"))
 
                 elif data.get("type") == "BLE":
                    #loop = asyncio.get_running_loop()
                    #await loop.run_in_executor(None, client.send_message, data.get("msg"), data.get("dst"))
                    await client.send_message(data.get("msg"), data.get("dst"))
-
 
                 else:
                    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -238,7 +238,7 @@ async def websocket_handler(websocket):
           clients.remove(websocket)
 
 
-async def handle_command(msg, websocket):
+async def handle_command(msg, websocket, MAC, BLE_Pin):
     if msg == "send message dump" or msg == "send pos dump":
         raw_list = [item["raw"] for item in message_store]
 
@@ -269,16 +269,16 @@ async def handle_command(msg, websocket):
         await ble_info()
 
     elif msg == "pair BLE":
-        await ble_pair()
+        await ble_pair(MAC, BLE_Pin)
 
     elif msg == "unpair BLE":
-        await ble_unpair()
+        await ble_unpair(MAC)
 
     elif msg == "disconnect BLE":
         await ble_disconnect()
 
     elif msg == "connect BLE":
-        await ble_connect()
+        await ble_connect(MAC)
 
     elif (msg.startswith("--set") | msg.startswith("--sym")):
         await client.set_commands(msg)
@@ -897,8 +897,8 @@ class NoInputNoOutputAgent(ServiceInterface):
         print("Request cancelled")
 
 
-async def ble_pair():
-    mac="D4:D4:DA:9E:B5:62"
+async def ble_pair(mac, BLE_Pin):
+    #mac="D4:D4:DA:9E:B5:62"
     path = mac_to_dbus_path(mac)
     bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
 
@@ -952,8 +952,8 @@ async def ble_pair():
     except Exception as e:
         print(f"❌ Failed to pair with {mac}: {e}")
 
-async def ble_unpair():
-    mac="D4:D4:DA:9E:B5:62"
+async def ble_unpair(mac):
+    #mac="D4:D4:DA:9E:B5:62"
     if has_console:
        print(f"🧹 Unpairing {mac} using blueZ ...")
 
@@ -981,20 +981,37 @@ async def ble_unpair():
 
 
 
-async def ble_connect():
+async def ble_connect(MAC):
+    global client  # we are assigning to global
+
+    if client is None:
+        client = BLEClient(
+            mac=MAC,
+            read_uuid="6e400003-b5a3-f393-e0a9-e50e24dcca9e",
+            write_uuid="6e400002-b5a3-f393-e0a9-e50e24dcca9e",
+            hello_bytes=b'\x04\x10\x20\x30'
+        )
+
     if not client._connected: 
       await client.connect()
       await client.start_notify()
       await client.monitor_connection()
       await client.send_hello()
     else:
+      msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'connect BLE result', 'result': 'error', 'msg': "can't connect, already connected" }
+      await ws_send(msg)
       if has_console:
          print("can't connect, already connected")
 
 async def ble_disconnect():
+    global client  # we are assigning to global
+    if client is None:
+      return
+
     if client._connected: 
       await client.disconnect()
       await client.close()
+      #client = None
     else:
       msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'disconnect BLE result', 'result': 'error', 'msg': "can't disconnect, already disconnected" }
       await ws_send(msg)
@@ -1003,9 +1020,17 @@ async def ble_disconnect():
          print("❌ can't disconnect, already disconnected")
 
 async def scan_ble_devices():
-    await client.scan_ble_devices()
+    scanclient = BLEClient(
+        mac ="",
+        read_uuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e", # UUID_Char_NOTIFY
+        write_uuid = "6e400002-b5a3-f393-e0a9-e50e24dcca9e", # UUID_Char_WRITE
+        hello_bytes = b'\x04\x10\x20\x30'
+    )
+    await scanclient.scan_ble_devices()
 
 async def ble_info():
+    if client is None:
+      return
     await client.ble_info()
 
 async def ws_send_json(message):
@@ -1083,7 +1108,10 @@ async def notification_handler(clean_msg):
              await ws_send_json(var)
 
            elif typ == "CONFFIN": # Habe Fertig! Mehr gibt es nicht
-             print("Habe fertig",var)
+             msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'conffin', 'result': 'ok', 'msg': "finished command" }
+             await ws_send(msg)
+             if has_console:
+                print("Habe fertig",var)
 
          except KeyError:
              print(error,var) 
@@ -1447,9 +1475,9 @@ async def main():
     #await client.disconnect()
     await ble_disconnect()
 
-    print("nach BLE disconnect …")
-    await client.close()
-    print("nach BLE close …")
+    #print("nach BLE disconnect …")
+    #await client.close()
+    #print("nach BLE close …")
 ##################################
 
 
@@ -1467,6 +1495,14 @@ async def main():
     print("Daten gespeichert.")
 
 if __name__ == "__main__":
+    client = None  # placeholder
+
+    #client = BLEClient(
+    #    mac ="D4:D4:DA:9E:B5:62",
+    #    read_uuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e", # UUID_Char_NOTIFY
+    #    write_uuid = "6e400002-b5a3-f393-e0a9-e50e24dcca9e", # UUID_Char_WRITE
+    #    hello_bytes = b'\x04\x10\x20\x30'
+    #)
     has_console = sys.stdout.isatty()
     config = load_config()
 
@@ -1497,12 +1533,6 @@ if __name__ == "__main__":
     store_file_name = config["STORE_FILE_NAME"]
     print(f"Messages will be stored on exit: {store_file_name}")
 
-    client = BLEClient(
-        mac ="D4:D4:DA:9E:B5:62",
-        read_uuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e", # UUID_Char_NOTIFY
-        write_uuid = "6e400002-b5a3-f393-e0a9-e50e24dcca9e", # UUID_Char_WRITE
-        hello_bytes = b'\x04\x10\x20\x30'
-    )
 
     try:
         asyncio.run(main())
