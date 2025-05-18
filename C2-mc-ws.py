@@ -16,7 +16,7 @@ from dbus_next import Variant
 from dbus_next import MessageType
 from dbus_next.aio import MessageBus
 from dbus_next.constants import BusType
-from dbus_next.errors import DBusError
+from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
 VERSION="v0.12.0"
@@ -350,7 +350,18 @@ class BLEClient:
 
         introspection = await self.bus.introspect(BLUEZ_SERVICE_NAME, self.path)
         self.device_obj = self.bus.get_proxy_object(BLUEZ_SERVICE_NAME, self.path, introspection)
-        self.dev_iface = self.device_obj.get_interface(DEVICE_INTERFACE)
+        try:
+           print("davor")
+           self.dev_iface = self.device_obj.get_interface(DEVICE_INTERFACE)
+           print("danach")
+        except InterfaceNotFoundError as e:
+           print(f"⚠️ Interface not found, device not paired: {e}")
+           msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'connect BLE result', 'result': 'error', 'mac': self.mac, 'msg': "Interface not found, device not paired" }
+           await ws_send(msg)
+           self._connected = False
+           self.bus = None
+           return
+
         self.props_iface = self.device_obj.get_interface(PROPERTIES_INTERFACE)
 
         try:
@@ -399,6 +410,13 @@ class BLEClient:
 
 
     async def start_notify(self, on_change=None):
+           #self._connected = False
+           #self.bus = None
+        if not self._connected: 
+           if has_console:
+              print("❌ Connection not established, start notify aborted")
+           return
+
         if has_console:
            print("▶️  Start notify ..")
 
@@ -463,11 +481,14 @@ class BLEClient:
     async def send_hello(self):
         if not self.bus:
            print("🛑 connection not established, can't send hello ..")
+           msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'send_hello result', 'result': 'error', 'msg': "connection not established, can't send" }
+           await ws_send(msg)
            return
 
         connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
         if not connected:
            print("🛑 connection lost, can't send ..")
+           msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'send_hello result', 'result': 'error', 'msg': "connection lost, can't send" }
            await self.disconnect() #aufräumen, vielleicht hilft es etwas
            await self.close() #aufräumen, vielleicht hilft es etwas
            return
@@ -485,11 +506,15 @@ class BLEClient:
 
         if not self.bus:
            print("🛑 connection not established, can't send ..")
+           msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'send_message result', 'result': 'error', 'msg': "connection not established, can't send" }
+           await ws_send(msg)
            return
 
         connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
         if not connected:
            print("🛑 connection lost, can't send ..")
+           msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'send_message result', 'result': 'error', 'msg': "connection lost, can't send" }
+           await self.disconnect() #aufräumen, vielleicht hilft es etwas
            await self.disconnect() #aufräumen, vielleicht hilft es etwas
            await self.close() #aufräumen, vielleicht hilft es etwas
            return
@@ -530,10 +555,14 @@ class BLEClient:
     async def a0_commands(self, cmd):
         if not self.bus:
            print("🛑 connection not established, can't send ..")
+           msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'a0_command result', 'result': 'error', 'msg': "connection not established, can't send" }
+           await ws_send(msg)
            return
 
         connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
         if not connected:
+            msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'a0_command result', 'result': 'error', 'msg': "connection lost, can't send" }
+            await ws_send(msg)
             print("🛑 connection lost, can't send ..")
             await self.disconnect() #aufräumen, vielleicht hilft es etwas
             if has_console:
@@ -568,6 +597,8 @@ class BLEClient:
        print("special commands, not yet implemented")
        
        if not self.bus:
+          msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'set_command result', 'result': 'error', 'msg': "connection not established, can't send" }
+          await ws_send(msg)
           print("🛑 connection not established, can't send ..")
           return
 
@@ -705,10 +736,23 @@ class BLEClient:
         self.bus = None
         self._connected = False
 
+    def _normalize_variant(self,value):
+      if isinstance(value, Variant):
+        return self._normalize_variant(value.value)
+      elif isinstance(value, dict):
+        return {k: self._normalize_variant(v) for k, v in value.items()}
+      elif isinstance(value, list):
+        return [self._normalize_variant(v) for v in value]
+      elif isinstance(value, bytes):
+        # Konvertiere bytes zu hex oder base64, je nach Bedarf
+        return value.hex()  # oder: base64.b64encode(obj).decode('ascii')
+      else:
+        return value
+
     async def ble_info(self):
       if not self.props_iface:
           print("⚠️  not connected, can't ask for info")
-          msg="{ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'BLE info result', 'result': 'error'}"
+          msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'BLE info result', 'result': 'error', 'msg': "not connected, can't ask for info"}
           await ws_send(msg)
           return
 
@@ -718,6 +762,12 @@ class BLEClient:
         print("🔍 BLE Device Info:")
         for key, val in props.items():
             print(f"  {key}: {val.value}")
+
+        normalized= self._normalize_variant(props)
+        normalized["TYP"] = "blueZinfo"
+        msg=transform_ble(normalized)
+        await ws_send(msg)
+
       except Exception as e:
         print(f"❌ Failed to fetch info for {self.props_iface}: {e}")
 
@@ -763,6 +813,23 @@ class BLEClient:
       self.obj_mgr_iface = self.obj_mgr.get_interface(OBJECT_MANAGER_INTERFACE)
       self.obj_mgr_iface.on_interfaces_added(_interfaces_added)
 
+      objects = await self.obj_mgr_iface.call_get_managed_objects()
+      objects["TYP"] = "blueZknown"
+      msg=transform_ble(self._normalize_variant(objects))
+      await ws_send(msg)
+
+      for path, interfaces in objects.items():
+       if DEVICE_INTERFACE in interfaces:
+        props = interfaces[DEVICE_INTERFACE]
+        name = props.get("Name", Variant("s", "")).value
+        addr = props.get("Address", Variant("s", "")).value
+        paired = props.get("Paired", Variant("b", False)).value
+        print(f"💾 Found device: {name} ({addr}, {paired})")
+
+       # if paired:
+       #     print(f"💾 Found already paired device: {name} ({addr})")
+
+
       # Start discovery
       await self.adapter.call_start_discovery()
 
@@ -778,6 +845,10 @@ class BLEClient:
       print(f"\n✅ Scan complete. Found {len(self.found_devices)} device(s):")
       for path, (name, addr, rssi) in self.found_devices.items():
           print(f"🔹 {name} | Address: {addr} | RSSI: {rssi}")
+
+      self.found_devices["TYP"] = "blueZunKNown"
+      msg=transform_ble(self._normalize_variant(self.found_devices))
+      await ws_send(msg)
 
       await self.close() #keine gute Idee, wir sind wo anders verbunden
       #if self.bus:
@@ -841,7 +912,14 @@ async def ble_pair():
 
     # Pair device
     dev_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, path, await bus.introspect(BLUEZ_SERVICE_NAME, path))
-    dev_iface = dev_obj.get_interface(DEVICE_INTERFACE)
+
+    try:
+        dev_iface = dev_obj.get_interface(DEVICE_INTERFACE)
+    except InterfaceNotFoundError as e:
+        print("❌ Error, device not found!")
+        msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'BLE pair result', 'result': 'error', 'mac': mac}
+        await ws_send(msg)
+        return
 
     try:
         await dev_iface.call_pair()
@@ -860,6 +938,8 @@ async def ble_pair():
         print(f"Bond state: {is_bonded}")
 
         await asyncio.sleep(2)  # allow time for registration to settle
+        msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'ble_pair result', 'result': 'ok', 'mac': mac, 'msg': "Successfully paired" }
+        await ws_send(msg)
 
         try:
            await dev_iface.call_disconnect()
@@ -885,8 +965,17 @@ async def ble_unpair():
                                    await bus.introspect(BLUEZ_SERVICE_NAME, adapter_path))
     adapter_iface = adapter_obj.get_interface("org.bluez.Adapter1")
 
-    await adapter_iface.call_remove_device(device_path)
+    try:
+      await adapter_iface.call_remove_device(device_path)
+    except DBusError as e:
+      print(f"❌ device {mac}",e)
+      msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'BLE unpair result', 'result': 'error', 'mac': mac}
+      await ws_send(msg)
+      return
+ 
     print(f"🧹 Unpaired device {mac}")
+    msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'BLE unpair result', 'result': 'ok', 'mac': mac}
+    await ws_send(msg)
 
 
 
@@ -905,8 +994,11 @@ async def ble_disconnect():
       await client.disconnect()
       await client.close()
     else:
+      msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'disconnect BLE result', 'result': 'error', 'msg': "can't disconnect, already disconnected" }
+      await ws_send(msg)
+
       if has_console:
-         print("can't disconnect, already disconnected")
+         print("❌ can't disconnect, already disconnected")
 
 async def scan_ble_devices():
     await client.scan_ble_devices()
@@ -1350,7 +1442,9 @@ async def main():
     print("Beende Server, speichere Daten …")
 
 #### BLE Handling ################
-    await client.disconnect()
+    #await client.disconnect()
+    await ble_disconnect()
+
     print("nach BLE disconnect …")
     await client.close()
     print("nach BLE close …")
