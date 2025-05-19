@@ -239,6 +239,8 @@ async def websocket_handler(websocket):
 
 
 async def handle_command(msg, websocket, MAC, BLE_Pin):
+    print("Line 242",msg , MAC, BLE_Pin) 
+
     if msg == "send message dump" or msg == "send pos dump":
         raw_list = [item["raw"] for item in message_store]
 
@@ -278,6 +280,7 @@ async def handle_command(msg, websocket, MAC, BLE_Pin):
         await ble_disconnect()
 
     elif msg == "connect BLE":
+        print("line 283", MAC)
         await ble_connect(MAC)
 
     elif (msg.startswith("--set") | msg.startswith("--sym")):
@@ -385,7 +388,12 @@ class BLEClient:
         await self._find_characteristics()
 
         if not self.read_char_iface or not self.write_char_iface:
-            raise Exception("❌ Charakteristika nicht gefunden")
+            print("❌ Charakteristika nicht gefunden")
+            msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'connect', 'result': 'error', 'msg': "connection not established, not yet paired" }
+            await ws_send(msg)
+            self._connected = False
+            self.bus = None
+            return
         
         self.read_props_iface = self.read_char_obj.get_interface(PROPERTIES_INTERFACE)
 
@@ -1011,7 +1019,8 @@ async def ble_disconnect():
     if client._connected: 
       await client.disconnect()
       await client.close()
-      #client = None
+      print("setting client to none on disconnect, so connect can work")
+      client = None
     else:
       msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'disconnect BLE result', 'result': 'error', 'msg': "can't disconnect, already disconnected" }
       await ws_send(msg)
@@ -1314,7 +1323,11 @@ def parse_aprs_position(message):
 
 def timestamp_from_date_time(date, time):
     dt_str = f"{date} {time}"
-    dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+    try:
+       dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+    except Exception as e:
+       dt = datetime.strptime("1970-01-01 00:00:00", "%Y-%m-%d %H:%M:%S")
+
     return int(dt.timestamp() * 1000)
 
 def transform_common_fields(d):
