@@ -140,7 +140,7 @@ def store_message(message: dict, raw: str):
        #we don't store the time signal
        if has_console:
          print(message.get("msg", "<no msg>"))
-    return
+       return
 
     message_size = len(json.dumps(timestamped).encode("utf-8"))
     message_store.append(timestamped)
