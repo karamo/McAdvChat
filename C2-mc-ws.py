@@ -129,13 +129,19 @@ def try_repair_json(text: str) -> dict:
     }
 
 
-
 def store_message(message: dict, raw: str):
     global message_store_size
     timestamped = {
         "timestamp": get_current_timestamp(),
         "raw": raw
     }
+
+    if message.get("msg", "<no msg>").startswith("{CET}"):
+       #we don't store the time signal
+       if has_console:
+         print(message.get("msg", "<no msg>"))
+    return
+
     message_size = len(json.dumps(timestamped).encode("utf-8"))
     message_store.append(timestamped)
     message_store_size += message_size
@@ -175,15 +181,15 @@ async def udp_listener():
         message["from"] = addr[0]
 
         if isinstance(message, dict) and isinstance(message.get("msg"), str):
-            if message["msg"].startswith("{CET}"):
-                if has_console:
-                   print(f"{readabel} {message['src_type']} von {addr[0]} Zeit: {message['msg']} ID:{message['msg_id']} src:{message['src']}")
-                   print(f"{readabel} {message['src_type']} von {addr[0]}: {message}")
-            else:
-                await loop.run_in_executor(None, store_message, message, json.dumps(message))
+            #if message["msg"].startswith("{CET}"):
+            #    if has_console:
+            #       print(f"{readabel} {message['src_type']} von {addr[0]} Zeit: {message['msg']} ID:{message['msg_id']} src:{message['src']}")
+            #       print(f"{readabel} {message['src_type']} von {addr[0]}: {message}")
+            #else:
+            await loop.run_in_executor(None, store_message, message, json.dumps(message))
                     
-                if has_console:
-                   print(f"{readabel} {message['src_type']} von {addr[0]}: {message}")
+            if has_console:
+               print(f"{readabel} {message['src_type']} von {addr[0]}: {message}")
 
         async with clients_lock:
                 targets = list(clients)
