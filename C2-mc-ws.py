@@ -19,7 +19,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.13.0"
+VERSION="v0.14.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 
 BLUEZ_SERVICE_NAME = "org.bluez"
@@ -131,6 +131,12 @@ def try_repair_json(text: str) -> dict:
 
 def store_message(message: dict, raw: str):
     global message_store_size
+
+    if not isinstance(message, dict):
+        if has_console:
+            print("store_message: invalid input, message is None or not a dict")
+        return
+
     timestamped = {
         "timestamp": get_current_timestamp(),
         "raw": raw
@@ -290,7 +296,7 @@ async def handle_command(msg, websocket, MAC, BLE_Pin):
         await ble_disconnect()
 
     elif msg == "connect BLE":
-        print("line 283", MAC)
+        #print("line 283", MAC)
         await ble_connect(MAC)
 
     elif (msg.startswith("--set") | msg.startswith("--sym")):
@@ -403,7 +409,7 @@ class BLEClient:
         if not connected:
            try:
              await self.dev_iface.call_connect()
-             print(f"✅ Neu verbunden mit {self.mac}")
+             print(f"✅ verbunden mit {self.mac}")
 
            except DBusError as e:
              print(f"⚠️  Connect timeout: {e}")
@@ -762,7 +768,8 @@ class BLEClient:
             print("⬇️  not connected - can't disconnect ..")
             return
         try:
-            print("⬇️ disconnect ..")
+            if has_console:
+              print("⬇️ disconnect ..")
             await blueZ_bubble('disconnect','info', "disconnecting ..")
             await self.stop_notify()
             await self.dev_iface.call_disconnect()
@@ -873,7 +880,8 @@ class BLEClient:
           name = props.get("Name", Variant("s", "")).value
           addr = props.get("Address", Variant("s", "")).value
           paired = props.get("Paired", Variant("b", False)).value
-          print(f"💾 Found device: {name} ({addr}, {paired})")
+          if has_console:
+            print(f"💾 Found device: {name} ({addr}, {paired})")
 
       objects["TYP"] = "blueZknown"
       msg=transform_ble(self._normalize_variant(objects))
@@ -1099,7 +1107,8 @@ async def ble_info():
 
 async def ws_send_json(message):
              output = dispatcher(message)
-             print(json.dumps(output, indent=2))
+             if has_console:
+               print(json.dumps(output, indent=2))
              await ws_send(output)
 
 async def ws_send(output):
@@ -1132,6 +1141,9 @@ async def notification_handler(clean_msg):
                "SE": "pressure und Co sensors",
                "SW": "Wifi ttings",
                "I": "Info page",
+               "IO": "IO page",
+               "TM": "TM page",
+               "AN": "AN page",
                "CONFFIN": "Habe fertig"
          }
 
@@ -1141,43 +1153,68 @@ async def notification_handler(clean_msg):
            #print("type_map",typ_mapping.get(var.get('TYP'), var))
 
            if typ == 'MH': # MH update
-             #print("MH",var)
+             #if has_console:
+             #  print("MH",var)
              await ws_send_json(var)
 
            elif typ == "SA": # APRS.fi Info
-             print("APRS", var)
+             #if has_console:
+             #  print("APRS", var)
              await ws_send_json(var)
 
            elif typ == "G": # GPS Info
-             print("GPS", var)
+             #if has_console:
+             #  print("GPS", var)
              await ws_send_json(var)
 
            elif typ == "W": # Wetter Info
-             print("Wetter", var)
+             #if has_console:
+             #  print("Wetter", var)
              await ws_send_json(var)
 
            elif typ == "SN": # System Settings 
-             #print("System Settings", var)
+             #if has_console:
+             #  print("System Settings", var)
              await ws_send_json(var)
 
            elif typ == "SE": # System Settings
-             print("Druck und Co Sensoren",var)
-             #await ws_send_json(var)
+             #if has_console:
+             #  print("Druck und Co Sensoren",var)
+             await ws_send_json(var)
 
            elif typ == "SW": # WIFI + IP Settings
-             print("Wifi Settings")
+             #if has_console:
+             #  print("Wifi Settings")
+             await ws_send_json(var)
 
            elif typ == "I": # Info Seite
-             print("Info Seite", var)
+             #if has_console:
+             #  print("Info Seite", var)
+             await ws_send_json(var)
+
+           elif typ == "IO": # neu
+             #if has_console:
+             #  print("Info Seite", var)
+             await ws_send_json(var)
+
+           elif typ == "TM": # neu
+             #if has_console:
+             #  print("neu", var)
+             await ws_send_json(var)
+
+           elif typ == "AN": # 
+             #if has_console:
+             #  print("neu", var)
              await ws_send_json(var)
 
            elif typ == "CONFFIN": # Habe Fertig! Mehr gibt es nicht
-             #msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'conffin', 'result': 'ok', 'msg': "finished command" }
-             #await ws_send(msg)
              await blueZ_bubble('conffin','ok', "✅ finished sending config")
 
              if has_console:
                 print("Habe fertig",var)
+           else:
+             if has_console:
+                print("type unknown",var)
 
          except KeyError:
              print(error,var) 
@@ -1466,24 +1503,58 @@ def dispatcher(input_dict):
     if "TYP" in input_dict:
         if input_dict["TYP"] == "MH":
             return transform_mh(input_dict)
-        if input_dict["TYP"] == "I":
-            print("Type I")
+        elif input_dict["TYP"] == "I":
+            if has_console:
+              print("Type I")
             return transform_ble(input_dict)
-        if input_dict["TYP"] == "SN":
-            print("Type SN")
+        elif input_dict["TYP"] == "SN":
+            if has_console:
+              print("Type SN")
             return transform_ble(input_dict)
-        if input_dict["TYP"] == "G":
-            print("Type G")
+        elif input_dict["TYP"] == "G":
+            if has_console:
+              print("Type G")
             return transform_ble(input_dict)
-        if input_dict["TYP"] == "SA":
-            print("Type SA")
+        elif input_dict["TYP"] == "SA":
+            if has_console:
+              print("Type SA")
             return transform_ble(input_dict)
-        if input_dict["TYP"] == "G":
-            print("Type G")
+        elif input_dict["TYP"] == "G":
+            if has_console:
+              print("Type G")
             return transform_ble(input_dict)
-        if input_dict["TYP"] == "W":
-            print("Type W")
+        elif input_dict["TYP"] == "W":
+            if has_console:
+              print("Type W")
             return transform_ble(input_dict)
+
+        elif input_dict["TYP"] == "IO":
+            if has_console:
+              print("Type IO")
+            return transform_ble(input_dict)
+
+        elif input_dict["TYP"] == "TM":
+            if has_console:
+              print("Type TM")
+            return transform_ble(input_dict)
+
+        elif input_dict["TYP"] == "AN":
+            if has_console:
+              print("Type AN")
+            return transform_ble(input_dict)
+
+        elif input_dict["TYP"] == "SE":
+            if has_console:
+              print("Type SE")
+            return transform_ble(input_dict)
+        elif input_dict["TYP"] == "SW":
+            if has_console:
+              print("Type SW")
+            return transform_ble(input_dict)
+        else:
+            if has_console:
+              print("Type nicht gefunden!",input_dict)
+
 
     elif input_dict.get("payload_type") == 58:
         return transform_msg(input_dict)
@@ -1552,10 +1623,10 @@ async def main():
 
 
     udp_task.cancel()
-    print("nach udp_task.cancel …")
+    #print("nach udp_task.cancel …")
 
     ws_server.close()
-    print("nach ws_server.close …")
+    #print("nach ws_server.close …")
 
     print("warten auf close.")
     await ws_server.wait_closed()
