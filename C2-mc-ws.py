@@ -19,7 +19,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.14.0"
+VERSION="v0.15.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 
 BLUEZ_SERVICE_NAME = "org.bluez"
@@ -299,6 +299,12 @@ async def handle_command(msg, websocket, MAC, BLE_Pin):
         #print("line 283", MAC)
         await ble_connect(MAC)
 
+    elif msg.startswith("--setboostedgain"):
+        if client is not None:
+           await client.a0_commands(msg)
+        else:
+           await blueZ_bubble('a0_command result', 'error', "client not connected" )
+
     elif (msg.startswith("--set") | msg.startswith("--sym")):
         if client is not None:
            await client.set_commands(msg)
@@ -308,6 +314,7 @@ async def handle_command(msg, websocket, MAC, BLE_Pin):
            await client.a0_commands(msg)
         else:
            await blueZ_bubble('a0_command result', 'error', "client not connected" )
+
 
     else:
         print(f"command not available", msg)
@@ -693,7 +700,7 @@ class BLEClient:
          cmd_byte = bytes([0x50])
          #0x50 - Callsign (--setCALL) [1B len - Callsign]
 
-       elif (cmd == "--setSSID" | cmd == "--setPWD"):
+       elif cmd == "--setSSID" or cmd == "--setPWD":
          param="TEST123"
          cmd_byte = bytes([0x55])
          laenge = len(param)
@@ -715,7 +722,7 @@ class BLEClient:
          cmd_byte = bytes([0x90])
          #0x90 - Altitude (--setALT) [1B length + 1B Msg-ID + 4B alt + 1B save_flag]
 
-       elif (cmd == "--symID" | cmd =="--symCD"):
+       elif cmd == "--symID" or cmd =="--symCD":
          param="G"
          cmd_byte = bytes([0x90])
          #0x95 - APRS Symbols (--symID --symCD)
