@@ -1432,7 +1432,7 @@ def parse_aprs_position(message):
     altitude = 0
     if alt_match:
         altitude_ft = int(alt_match.group(1))
-        altitude = round(altitude_ft * 0.3048, 0)
+        altitude = round(altitude_ft / 0.3048, 0)
 
     return {
         "lat": round(lat, 4),
