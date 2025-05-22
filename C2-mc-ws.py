@@ -1081,9 +1081,7 @@ async def ble_connect(MAC):
       await client.monitor_connection()
       await client.send_hello()
     else:
-      #msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'connect BLE result', 'result': 'error', 'msg': "can't connect, already connected" }
-      #await ws_send(msg)
-      await blueZ_bubble('connect BLE result','error', "can't connect, already connected")
+      await blueZ_bubble('connect BLE result','info', "BLE connection already running")
 
       if has_console:
          print("can't connect, already connected")
