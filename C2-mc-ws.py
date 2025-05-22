@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import asyncio
 import json
 import websockets
@@ -5,12 +6,13 @@ import socket
 import os
 import signal
 import sys
+import errno
 import time
 import unicodedata
+import re
 from struct import *
 from datetime import datetime, timedelta
 from collections import deque
-
 
 from dbus_next import Variant
 from dbus_next import MessageType
@@ -19,8 +21,11 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.15.0"
+VERSION="v0.16.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
+if os.getenv("MCADVCHAT_ENV") == "dev":
+   print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
+   CONFIG_FILE = "/etc/mcadvchat/config.dev.json"
 
 BLUEZ_SERVICE_NAME = "org.bluez"
 ADAPTER_INTERFACE = "org.bluez.Adapter1"
@@ -150,6 +155,11 @@ def store_message(message: dict, raw: str):
     if message.get("src_type", "<no type>") == "BLE":
        #if has_console:
        #  print("BLE no store");
+       return
+
+    if message.get("src", "<no type>") == "response":
+       if has_console:
+         print("ble response not stored");
        return
 
     message_size = len(json.dumps(timestamped).encode("utf-8"))
@@ -1405,13 +1415,24 @@ def strip_prefix(msg, prefix=":"):
 
 def parse_aprs_position(message):
     # APRS-Position: !4824.46N/01144.31EG...
-    import re
     match = re.match(r"!(\d{2})(\d{2}\.\d{2})([NS])[/\\](\d{3})(\d{2}\.\d{2})([EW])([A-Za-z])", message)
     if not match:
         return None
+
     lat_deg, lat_min, lat_dir, lon_deg, lon_min, lon_dir, symbol = match.groups()
     lat = int(lat_deg) + float(lat_min)/60
     lon = int(lon_deg) + float(lon_min)/60
+
+    if lat_dir == 'S':
+        lat = -lat
+    if lon_dir == 'W':
+        lon = -lon
+
+    alt_match = re.search(r"/A=(\d{6})", message)
+    altitude = 0
+    if alt_match:
+        altitude_ft = int(alt_match.group(1))
+        altitude = round(altitude_ft * 0.3048, 0)
 
     return {
         "lat": round(lat, 4),
@@ -1419,7 +1440,8 @@ def parse_aprs_position(message):
         "long": round(lon, 4),
         "long_dir": lon_dir,
         "aprs_symbol": symbol,
-        "aprs_symbol_group": "/"
+        "aprs_symbol_group": "/",
+        "alt": altitude
     }
 
 def timestamp_from_date_time(date, time):
@@ -1479,6 +1501,7 @@ def transform_pos(input_dict):
     }
 
 def transform_mh(input_dict):
+    #print("transform_mh", input_dict)
     return {
         "src_type": "lora",
         "type": "pos",
@@ -1488,6 +1511,7 @@ def transform_mh(input_dict):
         "lat_dir": "",
         "long": 0,
         "long_dir": "",
+        "alt": 0,
         "aprs_symbol": "",
         "hw_id": input_dict["HW"],
         "rssi": input_dict.get("RSSI"),
@@ -1580,7 +1604,18 @@ async def main():
     load_dump()
     prune_messages()
 
-    ws_server = await websockets.serve(websocket_handler, WS_HOST, WS_PORT)
+    try:
+      ws_server = await websockets.serve(websocket_handler, WS_HOST, WS_PORT)
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            print(f"❌ Address {WS_HOST}:{WS_PORT} already in use.")
+            print("🧠 Tip: Is another instance of the server already running?")
+            print("👀 Try `lsof -i :{}` or `netstat -tulpen | grep {}` to investigate.".format(WS_PORT, WS_PORT))
+            print("💣 Exiting gracefully from a non recoverale error.\n")
+            sys.exit(1)
+        else:
+            raise  # re-raise any other unexpected OSError
+
     udp_task = asyncio.create_task(udp_listener())
 
     loop = asyncio.get_running_loop()
@@ -1612,22 +1647,14 @@ async def main():
     #else:
     #   print("Kein Terminal erkannt – Eingabe von 'q' deaktiviert")
 
-    #print(f"WebSocket ws://{WS_HOST}:{WS_PORT}")
+    print(f"WebSocket ws://{WS_HOST}:{WS_PORT}")
     print(f"UDP-Listen {UDP_PORT_list}, Target MeshCom {UDP_TARGET}")
 
     await stop_event.wait()
 
     print("Beende Server, speichere Daten …")
 
-#### BLE Handling ################
-    #await client.disconnect()
     await ble_disconnect()
-
-    #print("nach BLE disconnect …")
-    #await client.close()
-    #print("nach BLE close …")
-##################################
-
 
     udp_task.cancel()
     #print("nach udp_task.cancel …")
@@ -1645,12 +1672,6 @@ async def main():
 if __name__ == "__main__":
     client = None  # placeholder
 
-    #client = BLEClient(
-    #    mac ="D4:D4:DA:9E:B5:62",
-    #    read_uuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e", # UUID_Char_NOTIFY
-    #    write_uuid = "6e400002-b5a3-f393-e0a9-e50e24dcca9e", # UUID_Char_WRITE
-    #    hello_bytes = b'\x04\x10\x20\x30'
-    #)
     has_console = sys.stdout.isatty()
     config = load_config()
 
@@ -1662,15 +1683,7 @@ if __name__ == "__main__":
     WS_HOST = config["WS_HOST"]
     WS_PORT = config["WS_PORT"]
 
-#DEV 
-    if has_console:
-      print("dev environemt detected")
-      UDP_PORT_list = 1800
-      UDP_TARGET = ("192.168.68.56", UDP_PORT_send)
-      WS_PORT = 2960
-####
-
-    print(f"Websockets Host and Port {WS_HOST}:{WS_PORT}")
+    #print(f"Websockets Host and Port {WS_HOST}:{WS_PORT}")
 
     PRUNE_HOURS = config["PRUNE_HOURS"]
     print(f"Messages older than {hours_to_dd_hhmm(PRUNE_HOURS)} get deleted")
