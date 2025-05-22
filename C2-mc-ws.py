@@ -21,7 +21,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.18.0"
+VERSION="v0.19.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
