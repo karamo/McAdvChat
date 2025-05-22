@@ -21,7 +21,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.16.0"
+VERSION="v0.17.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -1433,7 +1433,7 @@ def parse_aprs_position(message):
     altitude_ft = 0
     if alt_match:
         altitude_ft = int(alt_match.group(1))
-        #altitude = round(altitude_ft / 0.3048, 0)
+        altitude = round(altitude_ft * 0.3048, 0)
 
     return {
         "lat": round(lat, 4),
@@ -1442,7 +1442,7 @@ def parse_aprs_position(message):
         "long_dir": lon_dir,
         "aprs_symbol": symbol,
         "aprs_symbol_group": "/",
-        "alt": altitude_ft
+        "alt": altitude
     }
 
 def timestamp_from_date_time(date, time):
