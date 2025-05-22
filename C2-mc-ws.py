@@ -1430,9 +1430,10 @@ def parse_aprs_position(message):
 
     alt_match = re.search(r"/A=(\d{6})", message)
     altitude = 0
+    altitude_ft = 0
     if alt_match:
         altitude_ft = int(alt_match.group(1))
-        altitude = round(altitude_ft / 0.3048, 0)
+        #altitude = round(altitude_ft / 0.3048, 0)
 
     return {
         "lat": round(lat, 4),
@@ -1441,7 +1442,7 @@ def parse_aprs_position(message):
         "long_dir": lon_dir,
         "aprs_symbol": symbol,
         "aprs_symbol_group": "/",
-        "alt": altitude
+        "alt": altitude_ft
     }
 
 def timestamp_from_date_time(date, time):
