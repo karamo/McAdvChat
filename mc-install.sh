@@ -131,7 +131,7 @@ fi
 # --- Webserver neu starten ---
 log "Reloade Webserver ..."
 systemctl restart lighttpd || warn "Neustart fehlgeschlagen, versuche Reload"
-systemctl reload lighttpd || error "Reload von lighttpd fehlgeschlagen"
+#systemctl reload lighttpd || error "Reload von lighttpd fehlgeschlagen"
 
 # --- Funktionstest ---
 HOSTNAME=$(hostname -s)
