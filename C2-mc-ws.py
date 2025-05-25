@@ -21,7 +21,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.25.0"
+VERSION="v0.26.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -281,10 +281,13 @@ def process_message_store(message_store):
         except json.JSONDecodeError:
             continue
 
-        src = parsed.get("src")
+        #src = parsed.get("src")
+        src = safe_get(parsed, "src")
+
         
         if not src:
             continue
+
         callsigns = [s.strip() for s in src.split(",")]
 
         rssi = parsed.get("rssi")
