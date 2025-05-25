@@ -21,7 +21,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.26.0"
+VERSION="v0.27.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -69,10 +69,6 @@ def is_allowed_char(ch: str) -> bool:
 
     if ch in "⁰":
         return True
-
-    #we allow newline, but officially this isn't allowed in APRS messages, so it's a scripting mistake, that should be corrected
-    #if codepoint == 0x0A: 
-    #    return True 
     
     # ASCII 0x20 to 0x5C inclusive
     if 0x20 <= codepoint <= 0x5C:
@@ -102,29 +98,21 @@ def is_allowed_char(ch: str) -> bool:
     if category.startswith("S") or category.startswith("P") or "EMOJI" in unicodedata.name(ch, ""):
         return True
     
+    print("ende false");
     return False
 
-# UTF-8 Fixer
 def strip_invalid_utf8(data: bytes) -> str:
+    # Step 1: decode as much as possible in one go
+    text = data.decode("utf-8", errors="ignore")  # or "ignore" if you want silent drop
     valid_text = ''
-    i = 0
-    while i < len(data):
-        try:
-            char = data[i:i+1]
-            char = char.decode("utf-8")
-            if is_allowed_char(char):
-               valid_text += char
-            else:
-               cp = ord(char)
-               name = unicodedata.name(char, "<unknown>")
-               print(f"[ERROR] Invalid character: '{char}' (U+{cp:04X}, {name})")
-        
-        except UnicodeDecodeError:
-            pass
-        i += 1
-
+    for ch in text:
+        if is_allowed_char(ch):
+            valid_text += ch
+        else:
+            cp = ord(ch)
+            name = unicodedata.name(ch, "<unknown>")
+            print(f"[ERROR] Invalid character: '{ch}' (U+{cp:04X}, {name})")
     return valid_text
-    #return data.decode("utf-8", errors="ignore")
 
 # JSON Repair
 def try_repair_json(text: str) -> dict:
@@ -189,9 +177,12 @@ async def udp_listener():
       while True:
         data, addr = await loop.sock_recvfrom(udp_sock, 1024)
 
+        print("12", data)
         text = strip_invalid_utf8(data)
+        print("13", text)
 
         message = try_repair_json(text)
+        print("14", message)
         if not message or "msg" not in message:
            print(f"no msg object found in json: {message}")
        
