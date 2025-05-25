@@ -21,7 +21,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.24.0"
+VERSION="v0.25.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -204,7 +204,6 @@ async def udp_listener():
         if isinstance(message, dict) and isinstance(message.get("msg"), str):
             await loop.run_in_executor(None, store_message, message, json.dumps(message))
                     
-            print("debug")
             if has_console:
                print(f"{readabel} {message['src_type']} von {addr[0]}: {message}")
 
