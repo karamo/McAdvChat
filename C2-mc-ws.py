@@ -21,7 +21,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.21.0"
+VERSION="v0.22.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -1506,7 +1506,7 @@ def prune_messages():
             print(f"Skipping item due to malformed 'raw': {e}")
             continue
 
-        if raw_data.get("msg") == "-- invalid character --":
+        if raw_data.get("msg", "") == "-- invalid character --":
             print(f"invalid character suppressed from {raw_data.get('src')}")
             continue
 
@@ -1514,7 +1514,7 @@ def prune_messages():
             print(f"core dump messages suppressed: {raw_data.get('msg')} {raw_data.get('src')}")
             continue
 
-        if raw_data.get("src") in block_list:
+        if raw_data.get("src", "") in block_list:
             print(f"Blocked src: {raw_data.get('src')}")
             continue
 
