@@ -21,7 +21,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.23.0"
+VERSION="v0.24.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -122,7 +122,8 @@ def strip_invalid_utf8(data: bytes) -> str:
         except UnicodeDecodeError:
             pass
         i += 1
-    return result
+
+    return valid_text
     #return data.decode("utf-8", errors="ignore")
 
 # JSON Repair
@@ -194,15 +195,6 @@ async def udp_listener():
         if not message or "msg" not in message:
            print(f"no msg object found in json: {message}")
        
-        #msg = message["msg"]
-        #for c in msg:
-        #  if not is_allowed_char(c):
-        #    cp = ord(c)
-        #    name = unicodedata.name(c, "<unknown>")
-        #    print(f"[ERROR] Invalid character: '{c}' (U+{cp:04X}, {name})")
-        #    print(f"in: {message}")
-        #    message["msg"] = "-- invalid character --" #we remove bullshit
-
         message["timestamp"] = int(time.time() * 1000)
         dt = datetime.fromtimestamp(message['timestamp']/1000)
         readabel = dt.strftime("%d %b %Y %H:%M:%S")
@@ -212,6 +204,7 @@ async def udp_listener():
         if isinstance(message, dict) and isinstance(message.get("msg"), str):
             await loop.run_in_executor(None, store_message, message, json.dumps(message))
                     
+            print("debug")
             if has_console:
                print(f"{readabel} {message['src_type']} von {addr[0]}: {message}")
 
