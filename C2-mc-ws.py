@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
 import asyncio
-import json
-import websockets
-import socket
-import os
-import signal
-import sys
 import errno
+import json
+import os
+import re
+import signal
+import socket
+import sys
 import time
 import unicodedata
-import re
+import websockets
 from struct import *
 from datetime import datetime, timedelta
-from collections import deque
+from collections import deque, defaultdict
+from statistics import mean
 
-from dbus_next import Variant
-from dbus_next import MessageType
+from dbus_next import Variant, MessageType
 from dbus_next.aio import MessageBus
 from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.20.0"
+VERSION="v0.21.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -71,8 +71,8 @@ def is_allowed_char(ch: str) -> bool:
         return True
 
     #we allow newline, but officially this isn't allowed in APRS messages, so it's a scripting mistake, that should be corrected
-    if codepoint == 0x0A: 
-        return True 
+    #if codepoint == 0x0A: 
+    #    return True 
     
     # ASCII 0x20 to 0x5C inclusive
     if 0x20 <= codepoint <= 0x5C:
@@ -112,11 +112,18 @@ def strip_invalid_utf8(data: bytes) -> str:
         try:
             char = data[i:i+1]
             char = char.decode("utf-8")
-            valid_text += char
-            i += 1
+            if is_allowed_char(char):
+               valid_text += char
+            else:
+               cp = ord(char)
+               name = unicodedata.name(char, "<unknown>")
+               print(f"[ERROR] Invalid character: '{char}' (U+{cp:04X}, {name})")
+        
         except UnicodeDecodeError:
-            i += 1
-    return data.decode("utf-8", errors="ignore")
+            pass
+        i += 1
+    return result
+    #return data.decode("utf-8", errors="ignore")
 
 # JSON Repair
 def try_repair_json(text: str) -> dict:
@@ -158,6 +165,12 @@ def store_message(message: dict, raw: str):
     if message.get("src", "<no type>") == "response":
        return
 
+    if message.get("msg", "") == "-- invalid character --":
+       return
+
+    if "No core dump" in message.get("msg", ""):
+       return
+
     message_size = len(json.dumps(timestamped).encode("utf-8"))
     message_store.append(timestamped)
     message_store_size += message_size
@@ -181,14 +194,14 @@ async def udp_listener():
         if not message or "msg" not in message:
            print(f"no msg object found in json: {message}")
        
-        msg = message["msg"]
-        for c in msg:
-          if not is_allowed_char(c):
-            cp = ord(c)
-            name = unicodedata.name(c, "<unknown>")
-            print(f"[ERROR] Invalid character: '{c}' (U+{cp:04X}, {name})")
-            print(f"in: {message}")
-            message["msg"] = "-- invalid character --" #we remove bullshit
+        #msg = message["msg"]
+        #for c in msg:
+        #  if not is_allowed_char(c):
+        #    cp = ord(c)
+        #    name = unicodedata.name(c, "<unknown>")
+        #    print(f"[ERROR] Invalid character: '{c}' (U+{cp:04X}, {name})")
+        #    print(f"in: {message}")
+        #    message["msg"] = "-- invalid character --" #we remove bullshit
 
         message["timestamp"] = int(time.time() * 1000)
         dt = datetime.fromtimestamp(message['timestamp']/1000)
@@ -251,6 +264,92 @@ async def websocket_handler(websocket):
         async with clients_lock:
           clients.remove(websocket)
 
+# Constants
+BUCKET_SECONDS = 5 * 60
+VALID_RSSI_RANGE = (-140, -30)
+VALID_SNR_RANGE = (-30, 12)
+
+def is_valid_value(value, min_val, max_val):
+    return isinstance(value, (int, float)) and min_val <= value <= max_val
+
+def floor_to_bucket(unix_ms):
+    return int(unix_ms // 1000 // BUCKET_SECONDS * BUCKET_SECONDS)
+
+def process_message_store(message_store):
+    buckets = defaultdict(lambda: {"rssi": [], "snr": []})  # key: (bucket_time, callsign)
+
+    for item in message_store:
+        raw_str = item.get("raw")
+    
+        if not raw_str:
+            print("not str")
+            continue
+        try:
+            parsed = json.loads(raw_str)
+        except json.JSONDecodeError:
+            continue
+
+        src = parsed.get("src")
+        
+        if not src:
+            continue
+        callsigns = [s.strip() for s in src.split(",")]
+
+        rssi = parsed.get("rssi")
+        snr = parsed.get("snr")
+
+        timestamp_ms = parsed.get("timestamp")
+        if timestamp_ms is None:
+            continue
+
+        if not (is_valid_value(rssi, *VALID_RSSI_RANGE) and is_valid_value(snr, *VALID_SNR_RANGE)):
+            continue
+
+        bucket_time = floor_to_bucket(timestamp_ms)
+
+        for call in callsigns:
+            key = (bucket_time, call)
+            buckets[key]["rssi"].append(rssi)
+            buckets[key]["snr"].append(snr)
+
+    # Average and build output
+    result = []
+    for (bucket_time, callsign), values in buckets.items():
+        rssi_values = values["rssi"]
+        snr_values = values["snr"]
+        count = min(len(rssi_values), len(snr_values))
+
+        if count == 0:
+            continue
+
+        avg_rssi = round(mean(rssi_values), 1)
+        avg_snr = round(mean(snr_values), 1)
+        result.append({
+            "src_type": "STATS",
+            "timestamp": bucket_time,
+            "callsign": callsign,
+            "rssi": avg_rssi,
+            "snr": avg_snr,
+            "count": count
+        })
+
+    return result
+
+async def dump_mheard_data(websocket):
+    print("mheard started");
+    mheard = process_message_store(message_store)
+    print("mheard processed");
+
+    payload = {
+            "type": "response",
+            "msg": "mheard stats",
+            "data": mheard
+        }
+
+    json_data = json.dumps(payload)
+    await websocket.send(json_data)
+    print("mheard outputted");
+
 
 async def handle_command(msg, websocket, MAC, BLE_Pin):
     if msg == "send message dump" or msg == "send pos dump":
@@ -270,6 +369,9 @@ async def handle_command(msg, websocket, MAC, BLE_Pin):
         # Step 3: GZIP-compress
         #compressed_data = b"GZ" + gzip.compress(json_data.encode("utf-8"))
         #await websocket.send(compressed_data)
+
+    elif msg == "mheard dump":
+        await dump_mheard_data(websocket)
 
     elif msg == "dump to fs":
         with open(store_file_name, "w", encoding="utf-8") as f:
@@ -1375,19 +1477,61 @@ def decode_binary_message(byte_msg):
        return "Kein gueltiges Mesh-Format"
 
 
+block_list = [
+  "response",
+  "OE0XXX-99",
+  "DH1IAC-16",
+  "DH1IAC-15",
+  "DL2IAS-11",
+  "DM1HEL-13",
+  "DO3NOW-12",
+  "DF1WN-77",
+  "DF1WN-76",
+  "DF1WN-24",
+  "DF1WN-21"
+]
+
 def prune_messages():
     global message_store_size
     cutoff = datetime.utcnow() - timedelta(hours=PRUNE_HOURS)
     temp_store = deque()
     new_size = 0
+
     for item in message_store:
-        if datetime.fromisoformat(item["timestamp"]) > cutoff:
+        #print(f"next item {item}")
+
+        try:
+            raw_data = json.loads(item["raw"])
+        except (KeyError, json.JSONDecodeError) as e:
+            print(f"Skipping item due to malformed 'raw': {e}")
+            continue
+
+        if raw_data.get("msg") == "-- invalid character --":
+            print(f"invalid character suppressed from {raw_data.get('src')}")
+            continue
+
+        if "No core dump" in raw_data.get("msg", ""):
+            print(f"core dump messages suppressed: {raw_data.get('msg')} {raw_data.get('src')}")
+            continue
+
+        if raw_data.get("src") in block_list:
+            print(f"Blocked src: {raw_data.get('src')}")
+            continue
+
+        try:
+            timestamp = datetime.fromisoformat(item["timestamp"])
+        except ValueError as e:
+            print(f"Skipping item due to bad timestamp: {e}")
+            continue
+
+        if timestamp > cutoff:
             temp_store.append(item)
             new_size += len(json.dumps(item).encode("utf-8"))
+
     message_store.clear()
     message_store.extend(temp_store)
     message_store_size = new_size
-    #print(f"Nach Message clean {len(message_store)} Nachrichten")
+    print(f"After message cleaning {len(message_store)}")
 
 def load_dump():
     global message_store, message_store_size
@@ -1490,7 +1634,7 @@ def transform_pos(input_dict):
         "src_type": "lora",
         "type": "pos",
         "src": input_dict["path"].rstrip(">"),
-        "msg": "",
+        #"msg": "",
         "msg_id": hex_msg_id(input_dict["msg_id"]),
         "hw_id": input_dict["hardware_id"],
         **aprs,
@@ -1502,13 +1646,13 @@ def transform_mh(input_dict):
         "src_type": "lora",
         "type": "pos",
         "src": input_dict["CALL"],
-        "msg": "",
-        "lat": 0,
-        "lat_dir": "",
-        "long": 0,
-        "long_dir": "",
-        "alt": 0,
-        "aprs_symbol": "",
+        #"msg": "",
+        #"lat": 0,
+        #"lat_dir": "",
+        #"long": 0,
+        #"long_dir": "",
+        #"alt": 0,
+        #"aprs_symbol": "",
         "hw_id": input_dict["HW"],
         "rssi": input_dict.get("RSSI"),
         "snr": input_dict.get("SNR"),
