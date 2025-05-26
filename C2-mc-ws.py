@@ -14,6 +14,7 @@ from struct import *
 from datetime import datetime, timedelta
 from collections import deque, defaultdict
 from statistics import mean
+from operator import itemgetter
 
 from dbus_next import Variant, MessageType
 from dbus_next.aio import MessageBus
@@ -177,12 +178,10 @@ async def udp_listener():
       while True:
         data, addr = await loop.sock_recvfrom(udp_sock, 1024)
 
-        print("12", data)
         text = strip_invalid_utf8(data)
-        print("13", text)
 
         message = try_repair_json(text)
-        print("14", message)
+
         if not message or "msg" not in message:
            print(f"no msg object found in json: {message}")
        
@@ -322,9 +321,7 @@ def process_message_store(message_store):
     return result
 
 async def dump_mheard_data(websocket):
-    print("mheard started");
     mheard = process_message_store(message_store)
-    print("mheard processed");
 
     payload = {
             "type": "response",
@@ -334,21 +331,50 @@ async def dump_mheard_data(websocket):
 
     json_data = json.dumps(payload)
     await websocket.send(json_data)
-    print("mheard outputted");
 
+def get_initial_payload():
+    recent_items = list(reversed(message_store))
+    pos_msgs = [i["raw"] for i in recent_items if '"type": "pos"' in i["raw"]][:100]
+    msg_msgs = [i["raw"] for i in recent_items if '"type": "msg"' in i["raw"]][:200]
+    ack_msgs = [i["raw"] for i in recent_items if '"type": "ack"' in i["raw"]][:200]
+
+    return list(reversed(msg_msgs)) + list(reversed(ack_msgs)) + pos_msgs
+
+def get_full_dump():
+    pos_items = list(reversed([item for item in message_store if item.get("type") == "pos"]))
+    other_items = [item for item in message_store if item.get("type") != "pos"]
+
+    # Combine them: sorted 'pos' first, then the rest (unchanged order)
+    final_items = other_items + pos_items
+    return [item["raw"] for item in final_items]
 
 async def handle_command(msg, websocket, MAC, BLE_Pin):
     if msg == "send message dump" or msg == "send pos dump":
-        raw_list = [item["raw"] for item in message_store]
 
-        payload = {
-            "type": "response",
-            "msg": "message dump",
-            "data": raw_list 
+        preview = {
+          "type": "response",
+          "msg": "message dump",
+          "data": get_initial_payload()
         }
+        await websocket.send(json.dumps(preview))
+        await asyncio.sleep(1)
 
-        json_data = json.dumps(payload)
-        await websocket.send(json_data)
+        CHUNK_SIZE = 1000
+
+        full_data = get_full_dump()
+        total = len(full_data)
+
+        for i in range(0, total, CHUNK_SIZE):
+            if has_console:
+               print("sending message chunk ",i)
+            chunk = full_data[i:i+CHUNK_SIZE]
+            full = {
+                "type": "response",
+                "msg": "message dump",
+                "data": chunk
+            }
+            await websocket.send(json.dumps(full))
+            await asyncio.sleep(0)  # yield to event loop without delay
 
         #------------------------------------------------------------------
 
@@ -383,6 +409,9 @@ async def handle_command(msg, websocket, MAC, BLE_Pin):
         #print("line 283", MAC)
         await ble_connect(MAC)
 
+    elif msg == "resolve-ip":
+        await backend_resolve_ip(MAC)
+
     elif msg.startswith("--setboostedgain"):
         if client is not None:
            await client.a0_commands(msg)
@@ -411,6 +440,25 @@ async def blueZ_bubble(command, result, msg):
                 "timestamp": int(time.time() * 1000)
               }
       await ws_send(message)
+
+async def backend_resolve_ip(hostname):
+    if has_console:
+       print("resolving ip", hostname)
+
+    loop = asyncio.get_event_loop()
+
+    try:
+        infos = await loop.run_in_executor(None, socket.getaddrinfo, hostname, None)
+        ip = infos[0][4][0]
+        if has_console:
+           print(f"Resolved IP: {ip}")
+        
+        await blueZ_bubble("resolve-ip", "ok", ip)
+    except Exception as e:
+        if has_console:
+           print(f"Error resolving IP: {e}")
+        await blueZ_bubble("resolve-ip", "error", str(e)) 
+
 
 def mac_to_dbus_path(mac):
     return f"/org/bluez/hci0/dev_{mac.replace(':', '_')}"
@@ -702,23 +750,15 @@ class BLEClient:
     async def a0_commands(self, cmd):
         if not self.bus:
            print("🛑 connection not established, can't send ..")
-           #msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'a0_command result', 'result': 'error', 'msg': "connection not established, can't send" }
-           #await ws_send(msg)
            await blueZ_bubble('a0 command','error', f"❌ connection not established")
            return
 
         connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
         if not connected:
-            #msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'a0_command result', 'result': 'error', 'msg': "connection lost, can't send" }
-            #await ws_send(msg)
             await blueZ_bubble('a0 command','error', f"❌ connection lost")
             print("🛑 connection lost, can't send ..")
             await self.disconnect() #aufräumen, vielleicht hilft es etwas
-            if has_console:
-               print("debug: disconnect ..")
             await self.close() #aufräumen, vielleicht hilft es etwas
-            if has_console:
-               print("debug: close ..")
             return
 
         if has_console:
@@ -836,7 +876,7 @@ class BLEClient:
     async def monitor_connection(self):
         if not self.bus:
             print("⚠️ Kein D-Bus verbunden")
-            await blueZ_bubble('D-Bus','error', f"❌ kein D-Bus verbunn")
+            await blueZ_bubble('D-Bus','error', f"❌ kein D-Bus verbunden")
             return
 
         def handle_properties_changed(message):
@@ -944,7 +984,6 @@ class BLEClient:
               self.found_devices[path] = (name, addr, rssi)
               #print(f"🔹 {name} | Address: {addr} | RSSI: {rssi}", end="\r")
 
-            #Dazu müsste man das Callsign kennen, dann kann man spezifisch danach suchen
             #if name.startswith("MC-"):
             #    print("✅ Matching device found. Stopping discovery early...")
             #    found_mc_event.set()
@@ -970,17 +1009,14 @@ class BLEClient:
      
       # Track discovered devices
       self.found_devices = {}
-
       # Event zur Synchronisation
       found_mc_event = asyncio.Event()
 
-      # Listen to InterfacesAdded signal
-      # Subscribe to the signal
+      # Listen to InterfacesAdded signal # Subscribe to the signal
       self.obj_mgr = self.bus.get_proxy_object(BLUEZ_SERVICE_NAME, "/", await self.bus.introspect(BLUEZ_SERVICE_NAME, "/"))
       self.obj_mgr_iface = self.obj_mgr.get_interface(OBJECT_MANAGER_INTERFACE)
 
       objects = await self.obj_mgr_iface.call_get_managed_objects()
-
 
       device_count = 0
       for path, interfaces in objects.items():
@@ -990,8 +1026,17 @@ class BLEClient:
           name = props.get("Name", Variant("s", "")).value
           addr = props.get("Address", Variant("s", "")).value
           paired = props.get("Paired", Variant("b", False)).value
+
+          # ➕ New section: busy status
+          connected = props.get("Connected", Variant("b", False)).value
+          services_resolved = props.get("ServicesResolved", Variant("b", False)).value
+          busy = connected or services_resolved  
+          # ➕ Add busy flag to your device dictionary for later use (e.g. websocket message)
+          interfaces[DEVICE_INTERFACE]["Busy"] = Variant("b", busy)
+        
           if has_console:
-            print(f"💾 Found device: {name} ({addr}, {paired})")
+            #print(f"💾 Found device: {name} ({addr}, {paired})")
+            print(f"💾 Found device: {name} ({addr}, paired={paired}, busy={busy})")
 
       objects["TYP"] = "blueZknown"
       msg=transform_ble(self._normalize_variant(objects))
@@ -1021,7 +1066,6 @@ class BLEClient:
 
       print(f"\n✅ Scan complete. Not paired {len(self.found_devices)} device(s)")
       await blueZ_bubble('scan BLE','info', f"✅ Scan complete. Not paired {len(self.found_devices)} device(s)")
-
 
       for path, (name, addr, rssi) in self.found_devices.items():
           print(f"🔹 {name} | Address: {addr} | RSSI: {rssi}")
@@ -1466,15 +1510,6 @@ def decode_binary_message(byte_msg):
 block_list = [
   "response",
   "OE0XXX-99",
-  "DH1IAC-16",
-  "DH1IAC-15",
-  "DL2IAS-11",
-  "DM1HEL-13",
-  "DO3NOW-12",
-  "DF1WN-77",
-  "DF1WN-76",
-  "DF1WN-24",
-  "DF1WN-21"
 ]
 
 def safe_get(raw_data, key, default=""):
