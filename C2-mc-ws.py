@@ -22,7 +22,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.28.0"
+VERSION="v0.29.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -508,6 +508,7 @@ class BLEClient:
         self._on_value_change_cb = None
         self._connect_lock = asyncio.Lock()
         self._connected = False
+        self._keepalive_task = None
 
     async def connect(self):
       async with self._connect_lock:
@@ -575,16 +576,18 @@ class BLEClient:
 
         try:
           is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
-          if has_console:
-             print("Notifications sind .. ", is_notifying)
+          #if has_console:
+          #   print("Notifications sind .. ", is_notifying)
         except DBusError as e:
              print(f"⚠️ Fehler beim Abfragen von Notifying: {e}")
 
         self._connected = True
-        #msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'connect BLE result', 'result': 'ok' }
-        #await ws_send(msg)
         await blueZ_bubble('connect BLE result','ok', "connection established, downloading config ..")
-        #print("zeile 390",msg) 
+       
+        print("▶️  Starting keep alive ..")
+        if not self._keepalive_task or self._keepalive_task.done():
+                        self._keepalive_task = asyncio.create_task(self._send_keepalive())
+                
 
 
     async def _find_characteristics(self):
@@ -601,8 +604,8 @@ class BLEClient:
               print("❌ Connection not established, start notify aborted")
            return
 
-        if has_console:
-           print("▶️  Start notify ..")
+        #if has_console:
+        #   print("▶️  Start notify ..")
 
 
         is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
@@ -610,7 +613,6 @@ class BLEClient:
            if has_console:
               print("wir haben schon ein notify, also nix wie weg hier")
            return
-
 
         if not self.bus:
            print("❌ Connection not established, start notify aborted")
@@ -630,7 +632,7 @@ class BLEClient:
             is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
 
             if has_console:
-               print(f"📡 Notify gestartet, Status: {is_notifying}")
+               print(f"📡 Notify: {is_notifying}")
         except DBusError as e:
             print(f"⚠️ StartNotify fehlgeschlagen: {e}")
 
@@ -747,19 +749,22 @@ class BLEClient:
        #--mesh on/off
        #--display on/off
        #--gateway on/off
+
+
     async def a0_commands(self, cmd):
         if not self.bus:
            print("🛑 connection not established, can't send ..")
            await blueZ_bubble('a0 command','error', f"❌ connection not established")
            return
 
-        connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
-        if not connected:
-            await blueZ_bubble('a0 command','error', f"❌ connection lost")
-            print("🛑 connection lost, can't send ..")
-            await self.disconnect() #aufräumen, vielleicht hilft es etwas
-            await self.close() #aufräumen, vielleicht hilft es etwas
-            return
+        await self._check_conn()
+        #connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
+        #if not connected:
+        #    await blueZ_bubble('a0 command','error', f"❌ connection lost")
+        #    print("🛑 connection lost, can't send ..")
+        #    await self.disconnect() #aufräumen, vielleicht hilft es etwas
+        #    await self.close() #aufräumen, vielleicht hilft es etwas
+        #    return
 
         if has_console:
           print(f"✅ ready to send")
@@ -792,18 +797,19 @@ class BLEClient:
           print("🛑 connection not established, can't send ..")
           return
 
-       connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
-       if not connected:
-            print("🛑 connection lost, can't send ..")
-            await blueZ_bubble('set command','error', f"❌ connection lost")
-            await self.disconnect() #aufräumen, vielleicht hilft es etwas
-            if has_console:
-               print("debug: disconnect ..")
+       await self._check_conn()
+       #connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
+       #if not connected:
+       #     print("🛑 connection lost, can't send ..")
+       #     await blueZ_bubble('set command','error', f"❌ connection lost")
+       #     await self.disconnect() #aufräumen, vielleicht hilft es etwas
+       #     if has_console:
+       #        print("debug: disconnect ..")
 
-            await self.close() #aufräumen, vielleicht hilft es etwas
-            if has_console:
-               print("debug: close ..")
-            return
+       #     await self.close() #aufräumen, vielleicht hilft es etwas
+       #     if has_console:
+       #        print("debug: close ..")
+       #     return
 
        if has_console:
           print(f"✅ ready to send")
@@ -874,14 +880,25 @@ class BLEClient:
           print(f"alles zusammen und raus damit {cmd_byte} {laenge}")
 
     async def monitor_connection(self):
+        print("monitoring ..")
         if not self.bus:
             print("⚠️ Kein D-Bus verbunden")
             await blueZ_bubble('D-Bus','error', f"❌ kein D-Bus verbunden")
             return
 
         def handle_properties_changed(message):
+            #interface_name, changed_props, invalidated = message.body
+
+            #print(f"🌀 Props changed on {message.path}")
+            #print(f"🔧 Interface: {interface_name}")
+            #print(f"🧩 Changed Props:")
+
+            #for key, variant in changed_props.items():
+            #    print(f"    {key} = {variant.signature} → {variant.value}")
+
             if message.message_type != MessageType.SIGNAL:
                 return
+
             if message.interface != "org.freedesktop.DBus.Properties":
                 return
             if message.member != "PropertiesChanged":
@@ -889,22 +906,72 @@ class BLEClient:
             if message.path != self.path:
                 return
 
-            interface_name, changed_props, _ = message.body
-            if interface_name != DEVICE_INTERFACE:
-                return
+
+
+            print("35 monitoring ..")
 
             if "Connected" in changed_props:
                 connected = changed_props["Connected"].value
-                if not connected:
+
+
+                print("40 monitoring ..")
+
+                if not connected and self._connected:
                     print(f"📴 Verbindung zu {self.mac} wurde unterbrochen!")
-                    blueZ_bubble('Monitoring','error', f"❌ Verbindung zu {self.mac} unterbrochen")
+                    blueZ_bubble('Monitoring','error', f"❌ Monitor Verbindung zu {self.mac} unterbrochen")
                     self._connected = False
                     self.bus = None
                     # evtl. neu verbinden oder clean-up triggern
 
+                    #if self._keepalive_task:
+                    #    self._keepalive_task.cancel()
+                    #    self._keepalive_task = None
+
+                    blueZ_bubble('connectig','info', f"tryping to restore {self.mac}")
+                    ble_connect(self.mac)
+
         self.bus.add_message_handler(handle_properties_changed)
         if has_console:
            print(f"👂 Überwache BLE-Verbindung zu {self.mac}")
+
+    async def _check_conn(self):
+        connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
+        if not connected:
+           print(f"⚠️ Verbindung verloren")
+           await self.stop_notify()
+           await self.dev_iface.call_disconnect()
+           await self.close() #aufräumen, vielleicht hilft es etwas
+
+           await ble_connect(self.mac)
+
+    async def _send_keepalive(self):
+        try:
+            while self._connected:
+                await asyncio.sleep(120)  # 2 minutes
+                if has_console:
+                   print(f"📤 Sending keep-alive to {self.mac}")
+                try:
+                    props = await self.props_iface.call_get_all(DEVICE_INTERFACE)
+                    if not props["ServicesResolved"].value:
+                       await self._check_conn()
+
+                    #   print(f"⚠️ Verbindung verloren")
+                    #   #zuerst aufräumen
+                    #   await self.stop_notify()
+                    #   await self.dev_iface.call_disconnect()
+                    #   await self.close() #aufräumen, vielleicht hilft es etwas
+                    #   #client._connected = False
+
+                    #   #dann neu verbinden
+                    #   await ble_connect(self.mac)
+
+                    else:
+                      await client.a0_commands("--pos info")
+
+                except Exception as e:
+                    print(f"⚠️ Fehler beim Senden des Keep-Alive: {e}")
+        except asyncio.CancelledError:
+            print(f"⛔ Keep-alive für {self.mac} gestoppt")
 
 
     async def disconnect(self):
@@ -916,6 +983,11 @@ class BLEClient:
             if has_console:
               print("⬇️ disconnect ..")
             await blueZ_bubble('disconnect','info', "disconnecting ..")
+
+            if self._keepalive_task:
+               self._keepalive_task.cancel()
+               self._keepalive_task = None
+
             await self.stop_notify()
             await self.dev_iface.call_disconnect()
             await blueZ_bubble('disconnect','ok', "✅ disconnected")
@@ -1218,7 +1290,8 @@ async def ble_connect(MAC):
     if not client._connected: 
       await client.connect()
       await client.start_notify()
-      await client.monitor_connection()
+      #await client.monitor_connection() #bringt nix!
+
       await client.send_hello()
     else:
       await blueZ_bubble('connect BLE result','info', "BLE connection already running")
