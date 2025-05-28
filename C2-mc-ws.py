@@ -22,7 +22,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.31.0"
+VERSION="v0.32.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -1712,10 +1712,8 @@ def timestamp_from_date_time(date, time):
 def transform_common_fields(d):
     return {
         "src_type": "ble",
-        "msg_id": hex_msg_id(input_dict["msg_id"]),
         "firmware": d.get("fw"),
         "fw_sub": ascii_char(d.get("fw_subver")),
-        "hw_id": input_dict["hardware_id"],
         "max_hop": d.get("max_hop"),
         "mesh_info": d.get("mesh_info"),
         "node_timestamp": d.get("time_ms"),
@@ -1727,9 +1725,12 @@ def transform_common_fields(d):
 def transform_msg(input_dict):
     return {
         "type": "msg",
+        "src_type": "ble",
         "src": input_dict["path"].rstrip(">"),
         "dst": input_dict["dest"],
         "msg": strip_prefix(input_dict["message"]),
+        "msg_id": hex_msg_id(input_dict["msg_id"]),
+        "hw_id": input_dict["hardware_id"],
         **transform_common_fields(input_dict)
     }
 
@@ -1748,6 +1749,8 @@ def transform_pos(input_dict):
     return {
         "type": "pos",
         "src": input_dict["path"].rstrip(">"),
+        "msg_id": hex_msg_id(input_dict["msg_id"]),
+        "hw_id": input_dict["hardware_id"],
         #"msg": "",
         **aprs,
         **transform_common_fields(input_dict)
