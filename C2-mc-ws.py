@@ -22,7 +22,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.29.0"
+VERSION="v0.30.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -334,19 +334,50 @@ async def dump_mheard_data(websocket):
 
 def get_initial_payload():
     recent_items = list(reversed(message_store))
-    pos_msgs = [i["raw"] for i in recent_items if '"type": "pos"' in i["raw"]][:100]
-    msg_msgs = [i["raw"] for i in recent_items if '"type": "msg"' in i["raw"]][:200]
-    ack_msgs = [i["raw"] for i in recent_items if '"type": "ack"' in i["raw"]][:200]
+    pos_msgs = [
+      i["raw"] for i in recent_items[:200]
+      if json.loads(i["raw"]).get("type") == "pos"
+               ]
 
-    return list(reversed(msg_msgs)) + list(reversed(ack_msgs)) + pos_msgs
+    #ack_msgs = [i["raw"] for i in recent_items if '"type": "ack"' in i["raw"]][:200]
+
+    #msg_msgs = [i["raw"] for i in recent_items if '"type": "msg"' in i["raw"]][:200]
+
+    msgs_per_dst = defaultdict(list)
+
+    for i in recent_items:
+        raw = i["raw"]
+        if '"type": "msg"' not in raw:
+            continue
+        try:
+            data = json.loads(raw)
+            dst = data.get("dst")
+            if (dst is not None and len(msgs_per_dst[dst]) < 50):
+                msgs_per_dst[dst].append(raw)
+        except json.JSONDecodeError:
+            continue  # skip malformed JSON
+
+    # Flatten all dst buckets back into a single list
+    msg_msgs = []
+    for msg_list in msgs_per_dst.values():
+        msg_msgs.extend(reversed(msg_list))
+
+    #return msg_msgs + list(reversed(ack_msgs)) + pos_msgs
+    return msg_msgs + pos_msgs
 
 def get_full_dump():
-    pos_items = list(reversed([item for item in message_store if item.get("type") == "pos"]))
-    other_items = [item for item in message_store if item.get("type") != "pos"]
+    #pos_items = list(reversed(
+    #        [item for item in message_store
+    #           if json.loads(item["raw"]).get("type") == "pos"]
+    #        ))
 
-    # Combine them: sorted 'pos' first, then the rest (unchanged order)
-    final_items = other_items + pos_items
-    return [item["raw"] for item in final_items]
+    #ack_items = [item for item in message_store
+    #           if json.loads(item["raw"]).get("type") == "ack"]
+
+    msg_items = [item for item in message_store
+               if json.loads(item["raw"]).get("type") == "msg"]
+
+    return [item["raw"] for item in msg_items]
 
 async def handle_command(msg, websocket, MAC, BLE_Pin):
     if msg == "send message dump" or msg == "send pos dump":
@@ -357,12 +388,14 @@ async def handle_command(msg, websocket, MAC, BLE_Pin):
           "data": get_initial_payload()
         }
         await websocket.send(json.dumps(preview))
-        await asyncio.sleep(1)
+        await asyncio.sleep(0)
 
-        CHUNK_SIZE = 1000
+        CHUNK_SIZE = 20000
 
         full_data = get_full_dump()
         total = len(full_data)
+
+        print("total:",total)
 
         for i in range(0, total, CHUNK_SIZE):
             if has_console:
