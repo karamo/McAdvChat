@@ -26,7 +26,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.34.0"
+VERSION="v0.35.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -1739,6 +1739,7 @@ def node_time_checker(node_timestamp, typ = ""):
     current_time = int(time.time() * 1000)  # current time in ms
 
     time_delta_ms = current_time - node_timestamp
+    time_delta_s = time_delta_ms / 1000
 
     if abs(time_delta_ms) > 5000:
         print("⏱️ Time difference > 5 seconds")
@@ -1749,7 +1750,6 @@ def node_time_checker(node_timestamp, typ = ""):
         print("curr ", current_dt.strftime("%d %b %Y %H:%M:%S"))
         print("node ", node_dt.strftime("%d %b %Y %H:%M:%S"))
 
-#        time_delta_s = time_delta_ms / 1000
 #        delta_td = timedelta(seconds=abs(time_delta_s))
 #        total_days = delta_td.days
 #        total_seconds = delta_td.seconds
