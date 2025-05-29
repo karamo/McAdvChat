@@ -26,7 +26,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.33.0"
+VERSION="v0.34.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -339,33 +339,49 @@ async def dump_mheard_data(websocket):
 
 def get_initial_payload():
     recent_items = list(reversed(message_store))
-    pos_msgs = [
-      i["raw"] for i in recent_items[:200]
-      if json.loads(i["raw"]).get("type") == "pos"
-               ]
+
+    #pos_msgs = [
+    #  i["raw"] for i in recent_items[:200]
+    #  if json.loads(i["raw"]).get("type") == "pos"
+    #           ]
 
     #ack_msgs = [i["raw"] for i in recent_items if '"type": "ack"' in i["raw"]][:200]
 
     #msg_msgs = [i["raw"] for i in recent_items if '"type": "msg"' in i["raw"]][:200]
 
     msgs_per_dst = defaultdict(list)
+    pos_per_src = defaultdict(list)
 
     for i in recent_items:
         raw = i["raw"]
-        if '"type": "msg"' not in raw:
-            continue
-        try:
+
+        if '"type": "msg"' in raw:
+           try:
             data = json.loads(raw)
             dst = data.get("dst")
             if (dst is not None and len(msgs_per_dst[dst]) < 50):
-                msgs_per_dst[dst].append(raw)
-        except json.JSONDecodeError:
-            continue  # skip malformed JSON
+               msgs_per_dst[dst].append(raw)
+           except json.JSONDecodeError:
+               continue  # skip malformed JSON
+
+        elif '"type": "pos"' in raw:
+           try:
+            data = json.loads(raw)
+            src = data.get("src")
+            if (src is not None and len(pos_per_src[src]) < 50):
+               pos_per_src[src].append(raw)
+           except json.JSONDecodeError:
+               continue  # skip malformed JSON
+
 
     # Flatten all dst buckets back into a single list
     msg_msgs = []
     for msg_list in msgs_per_dst.values():
         msg_msgs.extend(reversed(msg_list))
+
+    pos_msgs = []
+    for pos_list in pos_per_src.values():
+        msg_msgs.extend(pos_list)
 
     #return msg_msgs + list(reversed(ack_msgs)) + pos_msgs
     return msg_msgs + pos_msgs
@@ -1370,7 +1386,6 @@ async def notification_handler(clean_msg):
     if clean_msg.startswith(b'D{'):
 
          var = decode_json_message(clean_msg)
-
          typ_mapping = {
                "MH": "MHead update",
                "SA": "APRS",
@@ -1392,65 +1407,41 @@ async def notification_handler(clean_msg):
            #print("type_map",typ_mapping.get(var.get('TYP'), var))
 
            if typ == 'MH': # MH update
-             #if has_console:
-             #  print("MH",var)
              await ws_send_json(var)
 
            elif typ == "SA": # APRS.fi Info
-             #if has_console:
-             #  print("APRS", var)
              await ws_send_json(var)
 
            elif typ == "G": # GPS Info
-             #if has_console:
-             #  print("GPS", var)
              await ws_send_json(var)
 
            elif typ == "W": # Wetter Info
-             #if has_console:
-             #  print("Wetter", var)
              await ws_send_json(var)
 
            elif typ == "SN": # System Settings 
-             #if has_console:
-             #  print("System Settings", var)
              await ws_send_json(var)
 
            elif typ == "SE": # System Settings
-             #if has_console:
-             #  print("Druck und Co Sensoren",var)
              await ws_send_json(var)
 
            elif typ == "SW": # WIFI + IP Settings
-             #if has_console:
-             #  print("Wifi Settings")
              await ws_send_json(var)
 
            elif typ == "I": # Info Seite
-             #if has_console:
-             #  print("Info Seite", var)
              await ws_send_json(var)
 
            elif typ == "IO": # neu
-             #if has_console:
-             #  print("Info Seite", var)
              await ws_send_json(var)
 
            elif typ == "TM": # neu
-             #if has_console:
-             #  print("neu", var)
              await ws_send_json(var)
 
            elif typ == "AN": # 
-             #if has_console:
-             #  print("neu", var)
              await ws_send_json(var)
 
            elif typ == "CONFFIN": # Habe Fertig! Mehr gibt es nicht
              await blueZ_bubble('conffin','ok', "✅ finished sending config")
 
-             if has_console:
-                print("Habe fertig",var)
            else:
              if has_console:
                 print("type unknown",var)
@@ -1748,19 +1739,17 @@ def node_time_checker(node_timestamp, typ = ""):
     current_time = int(time.time() * 1000)  # current time in ms
 
     time_delta_ms = current_time - node_timestamp
-    time_delta_s = time_delta_ms / 1000
-
-    # Human-readable time
-    current_dt = datetime.fromtimestamp(current_time / 1000)
-    node_dt = datetime.fromtimestamp(node_timestamp / 1000)
-
-    #print("delta (ms):", time_delta_ms)
 
     if abs(time_delta_ms) > 5000:
         print("⏱️ Time difference > 5 seconds")
+        # Human-readable time
+        current_dt = datetime.fromtimestamp(current_time / 1000)
+        node_dt = datetime.fromtimestamp(node_timestamp / 1000)
+
         print("curr ", current_dt.strftime("%d %b %Y %H:%M:%S"))
         print("node ", node_dt.strftime("%d %b %Y %H:%M:%S"))
 
+#        time_delta_s = time_delta_ms / 1000
 #        delta_td = timedelta(seconds=abs(time_delta_s))
 #        total_days = delta_td.days
 #        total_seconds = delta_td.seconds
