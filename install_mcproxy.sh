@@ -41,17 +41,19 @@ if [ ! -f "$VENV_DIR/bin/activate" ]; then
   python3 -m venv "$VENV_DIR"
 
   # 2. Activate and install websockets
-  echo "🚀Installing 'websockets' into virtualenv..."
+  echo "🚀Installing 'websockets, dbus and timezone' into virtualenv..."
   source "$VENV_DIR/bin/activate"
   pip install --upgrade pip
   pip install websockets
   pip install dbus_next
+  pip install timezonefinder
 else
   echo "Virtual environment already exists."
   source "$VENV_DIR/bin/activate"
   pip install --upgrade pip
   pip install --upgrade websockets
   pip install --upgrade dbus_next
+  pip install --upgrade timezonefinder
 fi
 
 # 3. Check if the Python script exists
