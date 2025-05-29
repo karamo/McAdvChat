@@ -7,11 +7,15 @@ import re
 import signal
 import socket
 import sys
-import time
 import unicodedata
 import websockets
 from struct import *
-from datetime import datetime, timedelta
+
+import time
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+from timezonefinder import TimezoneFinder
+
 from collections import deque, defaultdict
 from statistics import mean
 from operator import itemgetter
@@ -22,7 +26,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.32.0"
+VERSION="v0.33.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -786,8 +790,8 @@ class BLEClient:
 
         await self._check_conn()
 
-        if has_console:
-          print(f"✅ ready to send")
+        #if has_console:
+        #  print(f"✅ ready to send")
 
         byte_array = bytearray(cmd.encode('utf-8'))
 
@@ -808,7 +812,7 @@ class BLEClient:
        #--path -> gibts nichs
     async def set_commands(self, cmd):
        laenge = 0
-       print("special commands, not yet implemented")
+       #print("special commands, not yet implemented")
        
        if not self.bus:
           await blueZ_bubble('set command','error', f"❌ connection not established")
@@ -824,66 +828,69 @@ class BLEClient:
        if cmd == "--settime":
          cmd_byte = bytes([0x20])
 
-         time_str=get_current_timestamp()
-         time_str=time_str.replace("T", " ").split(".")[0]
+         now = int(time.time()  )  # current time in secons 
+         byte_array = now.to_bytes(4, byteorder='little')
+
+         laenge = len(byte_array) + 2
+         byte_array = laenge.to_bytes(1, 'big') +  cmd_byte + byte_array 
+
          if has_console:
-            print(f"Aktuelle Zeit {time_str}")
-
-         byte_array = bytearray(time_str.encode('utf-8'))
-
-         laenge = len(byte_array) + 3
-         byte_array = laenge.to_bytes(1, 'big') +  cmd_byte + byte_array + bytes([0x4b])
-
-         if self.write_char_iface:
-            await self.write_char_iface.call_write_value(byte_array, {})
-            if has_console:
-               print(f"📨 Message sent .. {byte_array}")
-
-         else:
-            print("⚠️ Keine Write-Charakteristik verfügbar")
+            print(f"Aktuelle Zeit {now}")
+            print("to hex:", ' '.join(f"{b:02X}" for b in byte_array))
 
 
-       elif cmd == "--setCALL":
-         cmd_byte = bytes([0x50])
-         #0x50 - Callsign (--setCALL) [1B len - Callsign]
 
-       elif cmd == "--setSSID" or cmd == "--setPWD":
-         param="TEST123"
-         cmd_byte = bytes([0x55])
-         laenge = len(param)
-         #0x55 - Wifi SSID (--setSSID) and PWD (--setPWD) [1B - SSID Length - SSID - 1B PWD Length - PWD]
+#       elif cmd == "--setCALL":
+#         cmd_byte = bytes([0x50])
+#         #0x50 - Callsign (--setCALL) [1B len - Callsign]
 
-       elif cmd == "--setLAT":
-         param="47.123"
-         cmd_byte = bytes([0x70])
-         #0x70 - Latitude (--setLAT) [1B length + 1B Msg-ID + 4B lat + 1B save_flag]
-         laenge = len(param)
+#       elif cmd == "--setSSID" or cmd == "--setPWD":
+#         param="TEST123"
+#         cmd_byte = bytes([0x55])
+#         laenge = len(param)
+#         #0x55 - Wifi SSID (--setSSID) and PWD (--setPWD) [1B - SSID Length - SSID - 1B PWD Length - PWD]
 
-       elif cmd == "--setLON":
-         param="47.123"
-         cmd_byte = bytes([0x80])
-         #0x80 - Longitude (--setLON) [1B length + 1B Msg-ID + 4B lon + 1B save_flag]
-         laenge = len(param)
+#       elif cmd == "--setLAT":
+#         param="47.123"
+#         cmd_byte = bytes([0x70])
+#         #0x70 - Latitude (--setLAT) [1B length + 1B Msg-ID + 4B lat + 1B save_flag]
+#         laenge = len(param)
 
-       elif cmd == "--setALT":
-         cmd_byte = bytes([0x90])
-         #0x90 - Altitude (--setALT) [1B length + 1B Msg-ID + 4B alt + 1B save_flag]
+#       elif cmd == "--setLON":
+#         param="47.123"
+#         cmd_byte = bytes([0x80])
+#         #0x80 - Longitude (--setLON) [1B length + 1B Msg-ID + 4B lon + 1B save_flag]
+#         laenge = len(param)
 
-       elif cmd == "--symID" or cmd =="--symCD":
-         param="G"
-         cmd_byte = bytes([0x90])
-         #0x95 - APRS Symbols (--symID --symCD)
-         laenge=len(param)
+#       elif cmd == "--setALT":
+#         cmd_byte = bytes([0x90])
+#         #0x90 - Altitude (--setALT) [1B length + 1B Msg-ID + 4B alt + 1B save_flag]
 
-       elif cmd == "--setFlash":
-       #0xF0 - Save Settings to Flash
-         cmd_byte = bytes([0xF0])
+#       elif cmd == "--symID" or cmd =="--symCD":
+#         param="G"
+#         cmd_byte = bytes([0x90])
+#         #0x95 - APRS Symbols (--symID --symCD)
+#         laenge=len(param)
 
        #     save_flag is 0x0A for save and 0x0B for don't save
        #(Aus Z.365ff https://github.com/icssw-org/MeshCom-Firmware/blob/oe1kfr_434q/src/phone_commands.cpp)
+#       elif cmd == "--setFlash":
+#       #0xF0 - Save Settings to Flash
+#         cmd_byte = bytes([0xF0])
+        
+       else:
+          print(f"❌ {cmd} not yet implemented")
+
+
+       if self.write_char_iface:
+            await self.write_char_iface.call_write_value(byte_array, {})
+            if has_console:
+               print(f"alles zusammen und raus damit {cmd_byte} {laenge}")
+               print(f"📨 Message sent .. {byte_array}")
+
+       else:
+            print("⚠️ Keine Write-Charakteristik verfügbar")
        
-       if has_console:
-          print(f"alles zusammen und raus damit {cmd_byte} {laenge}")
 
 #    async def monitor_connection(self):
 #        print("monitoring ..")
@@ -1278,6 +1285,7 @@ async def ble_unpair(mac):
 
 async def ble_connect(MAC):
     global client  # we are assigning to global
+    global time_sync
 
     if client is None:
         client = BLEClient(
@@ -1289,10 +1297,15 @@ async def ble_connect(MAC):
 
     if not client._connected: 
       await client.connect()
-      await client.start_notify()
-      #await client.monitor_connection() #bringt nix!
 
-      await client.send_hello()
+      if client._connected:
+        time_sync = TimeSyncTask(handle_timesync)
+        time_sync.start()
+
+        await client.start_notify()
+
+        await client.send_hello()
+
     else:
       await blueZ_bubble('connect BLE result','info', "BLE connection already running")
 
@@ -1305,6 +1318,8 @@ async def ble_disconnect():
       return
 
     if client._connected: 
+      if time_sync is not None:
+        await time_sync.stop()
       await client.disconnect()
       await client.close()
       client = None
@@ -1668,37 +1683,56 @@ def ascii_char(val):
 def strip_prefix(msg, prefix=":"):
     return msg[1:] if msg.startswith(prefix) else msg
 
+
 def parse_aprs_position(message):
-    # APRS-Position: !4824.46N/01144.31EG...
-    match = re.match(r"!(\d{2})(\d{2}\.\d{2})([NS])[/\\](\d{3})(\d{2}\.\d{2})([EW])([A-Za-z])", message)
+    # Extended APRS position format with optional symbol and symbol group
+    match = re.match(
+        r"!(\d{2})(\d{2}\.\d{2})([NS])([/\\])(\d{3})(\d{2}\.\d{2})([EW])([ -~]?)",
+        message
+    )
     if not match:
         return None
 
-    lat_deg, lat_min, lat_dir, lon_deg, lon_min, lon_dir, symbol = match.groups()
-    lat = int(lat_deg) + float(lat_min)/60
-    lon = int(lon_deg) + float(lon_min)/60
+    lat_deg, lat_min, lat_dir, symbol_group, lon_deg, lon_min, lon_dir, symbol = match.groups()
+
+    lat = int(lat_deg) + float(lat_min) / 60
+    lon = int(lon_deg) + float(lon_min) / 60
 
     if lat_dir == 'S':
         lat = -lat
     if lon_dir == 'W':
         lon = -lon
 
-    alt_match = re.search(r"/A=(\d{6})", message)
-    altitude = 0
-    altitude_ft = 0
-    if alt_match:
-        altitude_ft = int(alt_match.group(1))
-        altitude = round(altitude_ft * 0.3048, 0)
-
-    return {
+    result = {
+        "transformer2": "APRS",
         "lat": round(lat, 4),
         "lat_dir": lat_dir,
         "long": round(lon, 4),
         "long_dir": lon_dir,
-        "aprs_symbol": symbol,
-        "aprs_symbol_group": "/",
-        "alt": altitude_ft
+        "aprs_symbol": symbol or "?",
+        "aprs_symbol_group": symbol_group,
     }
+
+    # Altitude in feet: /A=001526
+    alt_match = re.search(r"/A=(\d{6})", message)
+    if alt_match:
+        altitude_ft = int(alt_match.group(1))
+        result["alt"] = altitude_ft
+
+    # Battery level: /B=085
+    battery_match = re.search(r"/B=(\d{3})", message)
+    if battery_match:
+        result["battery_level"] = int(battery_match.group(1))
+
+    # Groups: /R=...;...;...
+    group_match = re.search(r"/R=((?:\d{1,5};?){1,6})", message)
+    if group_match:
+        groups = group_match.group(1).split(";")
+        for i, g in enumerate(groups):
+            if g.isdigit():
+                result[f"group_{i}"] = int(g)
+
+    return result
 
 def timestamp_from_date_time(date, time):
     dt_str = f"{date} {time}"
@@ -1709,23 +1743,72 @@ def timestamp_from_date_time(date, time):
 
     return int(dt.timestamp() * 1000)
 
-def transform_common_fields(d):
+def node_time_checker(node_timestamp, typ = ""):
+    #print("node time checker")
+    current_time = int(time.time() * 1000)  # current time in ms
+
+    time_delta_ms = current_time - node_timestamp
+    time_delta_s = time_delta_ms / 1000
+
+    # Human-readable time
+    current_dt = datetime.fromtimestamp(current_time / 1000)
+    node_dt = datetime.fromtimestamp(node_timestamp / 1000)
+
+    #print("delta (ms):", time_delta_ms)
+
+    if abs(time_delta_ms) > 5000:
+        print("⏱️ Time difference > 5 seconds")
+        print("curr ", current_dt.strftime("%d %b %Y %H:%M:%S"))
+        print("node ", node_dt.strftime("%d %b %Y %H:%M:%S"))
+
+#        delta_td = timedelta(seconds=abs(time_delta_s))
+#        total_days = delta_td.days
+#        total_seconds = delta_td.seconds
+
+#        hours, remainder = divmod(total_seconds, 3600)
+#        minutes, seconds = divmod(remainder, 60)
+
+#        # Optional: For very large offsets (e.g., wrong year)
+#        year_diff = abs(current_dt.year - node_dt.year)
+
+#        direction = "ahead" if time_delta_ms < 0 else "behind"
+
+#        print(f"🕒 Node clock is {direction} by:")
+#        if year_diff >= 1:
+#            print(f"   → {year_diff} year(s), {total_days % 365} day(s), {hours}h {minutes}m {seconds}s")
+#        elif total_days >= 1:
+#            print(f"   → {total_days} day(s), {hours}h {minutes}m {seconds}s")
+#        else:
+#            print(f"   → {hours}h {minutes}m {seconds}s")
+
+#        ## Optional: show mod 24 hours difference
+#        #hour_offset = int(abs(time_delta_s) // 3600) % 24
+#        #print(f"🌀 Hour offset (modulo 24): {hour_offset}h")
+
+    return time_delta_s
+
+def transform_common_fields(input_dict):
+    node_timestamp = input_dict.get("time_ms")
+    #node_time_checker(node_timestamp)
     return {
+        "transformer1": "common_fields",
         "src_type": "ble",
-        "firmware": d.get("fw"),
-        "fw_sub": ascii_char(d.get("fw_subver")),
-        "max_hop": d.get("max_hop"),
-        "mesh_info": d.get("mesh_info"),
-        "node_timestamp": d.get("time_ms"),
+        "firmware": input_dict.get("fw"),
+        "fw_sub": ascii_char(input_dict.get("fw_subver")),
+        "max_hop": input_dict.get("max_hop"),
+        "mesh_info": input_dict.get("mesh_info"),
+        "lora_mod": input_dict.get("lora_mod"),
+        "last_hw": input_dict.get("lasthw"),
+        #"node_timestamp": node_timestamp,
+        "uptime_ms": node_timestamp,
         "timestamp": int(time.time() * 1000),
-        "lora_mod": d.get("lora_mod"),
-        "last_hw": d.get("lasthw")
     }
 
 def transform_msg(input_dict):
     return {
-        "type": "msg",
+        "transformer": "msg",
         "src_type": "ble",
+        "type": "msg",
         "src": input_dict["path"].rstrip(">"),
         "dst": input_dict["dest"],
         "msg": strip_prefix(input_dict["message"]),
@@ -1736,6 +1819,7 @@ def transform_msg(input_dict):
 
 def transform_ack(input_dict):
     return {
+       "transformer": "ack",
        "src_type": "ble",
        "type": "ack",
        "msg_id": hex_msg_id(input_dict["msg_id"]),
@@ -1747,20 +1831,34 @@ def transform_ack(input_dict):
 def transform_pos(input_dict):
     aprs = parse_aprs_position(input_dict["message"]) or {}
     return {
+        "transformer": "pos",
         "type": "pos",
         "src": input_dict["path"].rstrip(">"),
         "msg_id": hex_msg_id(input_dict["msg_id"]),
+        "msg": input_dict["message"],
         "hw_id": input_dict["hardware_id"],
-        #"msg": "",
         **aprs,
         **transform_common_fields(input_dict)
     }
 
 def transform_mh(input_dict):
+    node_timestamp = timestamp_from_date_time(input_dict["DATE"], input_dict["TIME"])
+    #node_time_checker(node_timestamp)
     return {
+        "transformer": "mh",
         "src_type": "ble",
         "type": "pos",
         "src": input_dict["CALL"],
+        "rssi": input_dict.get("RSSI"),
+        "snr": input_dict.get("SNR"),
+        "hw_id": input_dict["HW"],
+        "lora_mod": input_dict.get("MOD"),
+        "pl": input_dict.get("PL"),
+        "mesh": input_dict.get("MESH"),
+        "node_timestamp": node_timestamp,
+        #"timestamp": int(time.time() * 1000)
+        "timestamp": node_timestamp
+    }
         #"msg": "",
         #"lat": 0,
         #"lat_dir": "",
@@ -1768,16 +1866,145 @@ def transform_mh(input_dict):
         #"long_dir": "",
         #"alt": 0,
         #"aprs_symbol": "",
-        "rssi": input_dict.get("RSSI"),
-        "snr": input_dict.get("SNR"),
-        "pl": input_dict.get("PL"),
-        "mesh": input_dict.get("MESH"),
-        "node_timestamp": timestamp_from_date_time(input_dict["DATE"], input_dict["TIME"]),
-        "timestamp": int(time.time() * 1000)
+
+def safe_timestamp_from_dict(input_dict):
+    date_str = input_dict.get("DATE")
+    time_str = input_dict.get("TIME")
+
+    if not date_str:
+        #print("⚠️ Missing 'DATE' in input_dict")
+        return None
+
+    try:
+        # Case 1: Full datetime string in DATE field
+        if " " in date_str and not time_str:
+            dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+        # Case 2: Separate DATE and TIME fields
+        elif time_str:
+            dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M:%S")
+        # Case 3: Date only, assume midnight
+        else:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+
+        timestamp_ms = int(dt.timestamp() * 1000)
+        return timestamp_ms
+
+    except Exception as e:
+        print(f"❌ Failed to parse date/time: {e}")
+        return None
+
+def get_timezone_info(lat, lon):
+    tf = TimezoneFinder()
+    tz_name = tf.timezone_at(lat=lat, lng=lon)
+          
+    if not tz_name:
+        print("❌ Could not determine timezone")
+        return None
+
+    # Use system time (UTC) and apply tz_name
+    now_utc = datetime.utcnow()
+    dt_local = datetime.fromtimestamp(now_utc.timestamp(), ZoneInfo(tz_name))
+    
+    return {
+        "timezone": tz_name,
+        "offset_hours": dt_local.utcoffset().total_seconds() / 3600
     }
+    
+    
+class TimeSyncTask:
+    def __init__(self, coro_fn):
+        self._coro_fn = coro_fn
+        self._event = asyncio.Event()
+        self._running = False
+        self._task = None
+
+        self.lat = None
+        self.lon = None
+        #self.time_delta = None
+
+    def trigger(self, lat, lon):
+        loop = asyncio.get_running_loop()
+        loop.call_soon_threadsafe(self._set_data, lat, lon)
+
+    def _set_data(self, lat, lon):
+        self.lat = lat
+        self.lon = lon
+        #self.time_delta = time_delta
+        self._event.set()
+
+    async def runner(self):
+        self._running = True
+        while self._running:
+            await self._event.wait()
+            self._event.clear()
+
+            if None in (self.lat, self.lon):
+                print("Warning: missing input data, skipping task")
+                continue
+
+            try:
+              if self._running:
+                await self._coro_fn(self.lat, self.lon)
+            except Exception as e:
+                print(f"Error during async task: {e}")
+
+    def start(self):
+        self._task = asyncio.create_task(self.runner())
+
+    async def stop(self):
+        self._running = False
+        self._event.set()  # unblock wait
+        if self._task:
+            await self._task  # make sure it finishes
+
+async def handle_timesync (lat, lon):
+       if has_console:
+         print("adjusting time on node ..", lat, lon)
+       await asyncio.sleep(3)
+       now = datetime.utcnow()
+       
+       if lon == 0 or lat == 0:
+          if has_console:
+            print("Lon/Lat not set, fallback on Raspberry Pi TZ info")
+          # Current local time
+
+          # UTC offset in seconds
+          offset_sec = time.altzone if time.daylight and time.localtime().tm_isdst else time.timezone
+
+          # Convert to hours
+          offset = -offset_sec / 3600
+       
+       else:
+          tz = get_timezone_info(lat, lon)
+          offset = tz.get("offset_hours")
+          tz_name = tz.get("timezone")
+
+       if has_console:
+         print("TZ UTC Offset", offset, "TZ name", tz_name )
+
+       print("Time offset detected, correcting time")
+       await handle_command(f"--utcoff {offset}", "", "", "")
+       await asyncio.sleep(2)
+       await handle_command("--settime", "", "", "")
+
 
 def transform_ble(input_dict):
+    typ = input_dict.get("TYP")
+    node_timestamp = safe_timestamp_from_dict(input_dict)
+    if node_timestamp is not None and typ == "G":
+      time_delta = node_time_checker(node_timestamp, typ)
+
+      if abs(time_delta) > 8:
+       lon = input_dict.get("LON")
+       lat = input_dict.get("LAT")
+      
+       if time_sync is not None:
+           time_sync.trigger(lat, lon)
+       else:
+           print("Warning: time_sync not initialized")
+
     return{
+        "transformer": "generic_ble",
         "src_type": "BLE",
          **input_dict,
         "timestamp": int(time.time() * 1000)
@@ -1897,13 +2124,15 @@ async def main():
     if sys.stdin.isatty():
        print("Drücke 'q' + Enter zum Beenden und Speichern")
        loop.run_in_executor(None, stdin_reader)
-    #else:
-    #   print("Kein Terminal erkannt – Eingabe von 'q' deaktiviert")
 
     print(f"WebSocket ws://{WS_HOST}:{WS_PORT}")
     print(f"UDP-Listen {UDP_PORT_list}, Target MeshCom {UDP_TARGET}")
 
+
     await stop_event.wait()
+
+    if time_sync is not None:
+       await time_sync.stop()
 
     print("Stopping server, svaing to disc …")
 
@@ -1922,6 +2151,7 @@ async def main():
 
 if __name__ == "__main__":
     client = None  # placeholder
+    time_sync = None
 
     has_console = sys.stdout.isatty()
     config = load_config()
