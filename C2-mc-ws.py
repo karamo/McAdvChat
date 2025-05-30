@@ -255,6 +255,7 @@ async def websocket_handler(websocket):
 BUCKET_SECONDS = 5 * 60
 VALID_RSSI_RANGE = (-140, -30)
 VALID_SNR_RANGE = (-30, 12)
+SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
 def is_valid_value(value, min_val, max_val):
     return isinstance(value, (int, float)) and min_val <= value <= max_val
@@ -263,6 +264,9 @@ def floor_to_bucket(unix_ms):
     return int(unix_ms // 1000 // BUCKET_SECONDS * BUCKET_SECONDS)
 
 def process_message_store(message_store):
+    now_ms = int(time.time() * 1000)
+    cutoff_timestamp_ms = now_ms - SEVEN_DAYS_MS
+
     buckets = defaultdict(lambda: {"rssi": [], "snr": []})  # key: (bucket_time, callsign)
 
     for item in message_store:
@@ -276,9 +280,7 @@ def process_message_store(message_store):
         except json.JSONDecodeError:
             continue
 
-        #src = parsed.get("src")
         src = safe_get(parsed, "src")
-
         
         if not src:
             continue
@@ -287,9 +289,10 @@ def process_message_store(message_store):
 
         rssi = parsed.get("rssi")
         snr = parsed.get("snr")
-
         timestamp_ms = parsed.get("timestamp")
-        if timestamp_ms is None:
+
+        #if timestamp_ms is None:
+        if timestamp_ms is None or timestamp_ms < cutoff_timestamp_ms:
             continue
 
         if not (is_valid_value(rssi, *VALID_RSSI_RANGE) and is_valid_value(snr, *VALID_SNR_RANGE)):
