@@ -47,6 +47,7 @@ if [ ! -f "$VENV_DIR/bin/activate" ]; then
   pip install websockets
   pip install dbus_next
   pip install timezonefinder
+  pip install zstandard
 else
   echo "Virtual environment already exists."
   source "$VENV_DIR/bin/activate"
@@ -54,6 +55,7 @@ else
   pip install --upgrade websockets
   pip install --upgrade dbus_next
   pip install --upgrade timezonefinder
+  pip install --upgrade zstandard
 fi
 
 # 3. Check if the Python script exists

@@ -26,6 +26,8 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
+#from daily_sqlite_dumper import DailySQLiteDumper
+
 VERSION="v0.35.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
@@ -37,21 +39,6 @@ block_list = [
   "OE0XXX-99",
 ]
 
-BLUEZ_SERVICE_NAME = "org.bluez"
-AGENT_INTERFACE = "org.bluez.Agent1"
-ADAPTER_INTERFACE = "org.bluez.Adapter1"
-DEVICE_INTERFACE = "org.bluez.Device1"
-GATT_CHARACTERISTIC_INTERFACE = "org.bluez.GattCharacteristic1"
-PROPERTIES_INTERFACE = "org.freedesktop.DBus.Properties"
-OBJECT_MANAGER_INTERFACE = "org.freedesktop.DBus.ObjectManager"
-
-AGENT_PATH = "/com/example/agent"
-
-clients = set()
-clients_lock = asyncio.Lock()
-
-message_store = deque()
-message_store_size = 0
 
 def load_config(path=CONFIG_FILE):
     with open(path, "r", encoding="utf-8") as f:
@@ -210,7 +197,7 @@ async def udp_listener():
             await asyncio.gather(*send_tasks, return_exceptions=True)
 
     except asyncio.CancelledError: 
-        print("udp_listener was cancelled. Closing socket.")
+        print("udp_listener shutting down. Closing socket.")
     finally:
         udp_sock.close()
 
@@ -315,8 +302,8 @@ def process_message_store(message_store):
         if count == 0:
             continue
 
-        avg_rssi = round(mean(rssi_values), 1)
-        avg_snr = round(mean(snr_values), 1)
+        avg_rssi = round(mean(rssi_values), 2)
+        avg_snr = round(mean(snr_values), 2)
         result.append({
             "src_type": "STATS",
             "timestamp": bucket_time,
@@ -419,7 +406,8 @@ async def handle_command(msg, websocket, MAC, BLE_Pin):
         full_data = get_full_dump()
         total = len(full_data)
 
-        print("total:",total)
+        if has_console:
+          print("total:",total)
 
         for i in range(0, total, CHUNK_SIZE):
             if has_console:
@@ -1130,7 +1118,8 @@ class BLEClient:
           paired = props.get("Paired", Variant("b", False)).value
           connected = props.get("Connected", Variant("b", False)).value
           services_resolved = props.get("ServicesResolved", Variant("b", False)).value
-          busy = connected or services_resolved  
+          #busy = connected or services_resolved  
+          busy = False
           interfaces[DEVICE_INTERFACE]["Busy"] = Variant("b", busy)
         
           if has_console:
@@ -1335,12 +1324,16 @@ async def ble_disconnect():
     global client  # we are assigning to global
     if client is None:
       return
-
+    
+    print("debug: in ble disconnect")
     if client._connected: 
       if time_sync is not None:
         await time_sync.stop()
+      print("debug: time_sync.stop")
       await client.disconnect()
+      print("debug: past client.discnnect")
       await client.close()
+      print("debug: past client.close")
       client = None
     else:
       await blueZ_bubble('disconnect BLE result','error', "can't disconnect, already discconnected")
@@ -1952,7 +1945,7 @@ class TimeSyncTask:
 async def handle_timesync (lat, lon):
        if has_console:
          print("adjusting time on node ..", lat, lon)
-       await asyncio.sleep(3)
+       await asyncio.sleep(10) #collect all events and just execute once
        now = datetime.utcnow()
        
        if lon == 0 or lat == 0:
@@ -1978,6 +1971,14 @@ async def handle_timesync (lat, lon):
        await handle_command(f"--utcoff {offset}", "", "", "")
        await asyncio.sleep(2)
        await handle_command("--settime", "", "", "")
+    
+       #new save logic
+       #await dumper.append_message(
+       #   message=my_parsed_dict,
+       #   raw=my_raw_json_str
+       #  )
+       #last_ts = await dumper.get_latest_timestamp()
+       #await dumper.prune_old_files()
 
 
 def transform_ble(input_dict):
@@ -2105,7 +2106,7 @@ async def main():
 
     # 🛡️ Signal-Handler (SIGINT = Ctrl+C, SIGTERM = systemctl stop)
     def handle_shutdown():
-       print("🛡️ Signal empfangen, beende Dienst ...")
+       print("🛡️ Signal received, stopping proxy service ..")
        loop.call_soon_threadsafe(stop_event.set)
 
     # ✅ Signal-Handler registrieren
@@ -2121,29 +2122,56 @@ async def main():
     print(f"UDP-Listen {UDP_PORT_list}, Target MeshCom {UDP_TARGET}")
 
 
+    print("debug: await stop_event.wait")
     await stop_event.wait()
+    print("debug: past await stop_event.wait")
 
+    print("Stopping mc node time sync ..")
     if time_sync is not None:
        await time_sync.stop()
+    print("debug: past Stopping mc node time sync ..")
 
-    print("Stopping server, svaing to disc …")
+    print("Stopping proxy server, svaing to disc ..")
 
     await ble_disconnect()
+    print("debug: past Stopping proxy server, svaing to disc ..")
 
+    print("debug: udp_task.cancel ..")
+    #await udp_task.cancel()
     udp_task.cancel()
+    print("debug: past udp_task.cancel ..")
 
+    print("debug: ws_server.close ..")
+    #await ws_server.close()
     ws_server.close()
-
-    print("warten auf close.")
-    await ws_server.wait_closed()
+    print("debug: past ws_server.close ..")
 
     with open(store_file_name, "w", encoding="utf-8") as f:
         json.dump(list(message_store), f, ensure_ascii=False, indent=2)
-    print("Daten gespeichert.")
+    print("stored message data.")
+
+    print("warten auf close.")
+    await ws_server.wait_closed()
+    print("debug: past warten auf close.")
 
 if __name__ == "__main__":
     client = None  # placeholder
     time_sync = None
+    BLUEZ_SERVICE_NAME = "org.bluez"
+    AGENT_INTERFACE   = "org.bluez.Agent1"
+    ADAPTER_INTERFACE = "org.bluez.Adapter1"
+    DEVICE_INTERFACE  = "org.bluez.Device1"
+    GATT_CHARACTERISTIC_INTERFACE = "org.bluez.GattCharacteristic1"
+    PROPERTIES_INTERFACE     = "org.freedesktop.DBus.Properties"
+    OBJECT_MANAGER_INTERFACE = "org.freedesktop.DBus.ObjectManager"
+
+    AGENT_PATH = "/com/example/agent"
+
+    clients = set()
+    clients_lock = asyncio.Lock()
+
+    message_store = deque()
+    message_store_size = 0
 
     has_console = sys.stdout.isatty()
     config = load_config()
@@ -2165,6 +2193,7 @@ if __name__ == "__main__":
     store_file_name = config["STORE_FILE_NAME"]
     print(f"Messages will be stored on exit: {store_file_name}")
 
+    #dumper = DailySQLiteDumper()
 
     try:
         asyncio.run(main())
