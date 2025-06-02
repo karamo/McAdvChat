@@ -160,48 +160,157 @@ def store_message(message: dict, raw: str):
         removed = message_store.popleft()
         message_store_size -= len(json.dumps(removed).encode("utf-8"))
 
-async def udp_listener():
-    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp_sock.bind(("", UDP_PORT_list))
-    udp_sock.setblocking(False)
+#async def udp_listener():
+#    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+#    udp_sock.bind(("", UDP_PORT_list))
+#    udp_sock.setblocking(False)
+#
+#    loop = asyncio.get_running_loop()
+#    try: 
+#      while True:
+#        data, addr = await loop.sock_recvfrom(udp_sock, 1024)
+#
+#        text = strip_invalid_utf8(data)
+#
+#        message = try_repair_json(text)
+#
+#        if not message or "msg" not in message:
+#           print(f"no msg object found in json: {message}")
+#       
+#        message["timestamp"] = int(time.time() * 1000)
+#        dt = datetime.fromtimestamp(message['timestamp']/1000)
+#        readabel = dt.strftime("%d %b %Y %H:%M:%S")
+#
+#        message["from"] = addr[0]
+#
+#        if isinstance(message, dict) and isinstance(message.get("msg"), str):
+#            await loop.run_in_executor(None, store_message, message, json.dumps(message))
+#                    
+#            if has_console:
+#               print(f"{readabel} {message['src_type']} von {addr[0]}: {message}")
+#
+#        async with clients_lock:
+#                targets = list(clients)
+#
+#        if targets:
+#            send_tasks = [asyncio.create_task(client.send(json.dumps(message))) for client in targets]
+#            await asyncio.gather(*send_tasks, return_exceptions=True)
+#
+#    except asyncio.CancelledError: 
+#        print("udp_listener shutting down. Closing socket.")
+#    finally:
+#        udp_sock.close()
 
-    loop = asyncio.get_running_loop()
-    try: 
-      while True:
-        data, addr = await loop.sock_recvfrom(udp_sock, 1024)
-
+class UDPHandler:
+    def __init__(self, listen_port, target_host, target_port, message_callback=None):
+        self.listen_port = listen_port
+        self.target_host = target_host
+        self.target_port = target_port
+        self.target_address = (target_host, target_port)
+        self.message_callback = message_callback
+        
+        self.listen_socket = None
+        self._running = False
+        self._listen_task = None
+        
+    async def start_listening(self):
+        if self._running:
+            print("UDP listener already running")
+            return
+            
+        self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.listen_socket.bind(("", self.listen_port))
+        self.listen_socket.setblocking(False)
+        
+        self._running = True
+        self._listen_task = asyncio.create_task(self._listen_loop())
+        print(f"UDP listener started on port {self.listen_port}")
+        
+    async def stop_listening(self):
+        if not self._running:
+            return
+            
+        self._running = False
+        if self._listen_task:
+            self._listen_task.cancel()
+            try:
+                await self._listen_task
+            except asyncio.CancelledError:
+                pass
+                
+        if self.listen_socket:
+            self.listen_socket.close()
+            self.listen_socket = None
+            
+        print("UDP listener stopped")
+        
+    async def _listen_loop(self):
+        loop = asyncio.get_running_loop()
+        try:
+            while self._running:
+                data, addr = await loop.sock_recvfrom(self.listen_socket, 1024)
+                await self._process_received_message(data, addr)
+                
+        except asyncio.CancelledError:
+            print("UDP listener shutting down")
+        except Exception as e:
+            print(f"Error in UDP listener: {e}")
+        finally:
+            if self.listen_socket:
+                self.listen_socket.close()
+                
+    async def _process_received_message(self, data, addr):
         text = strip_invalid_utf8(data)
-
         message = try_repair_json(text)
 
         if not message or "msg" not in message:
-           print(f"no msg object found in json: {message}")
-       
+            print(f"No msg object found in JSON: {message}")
+            return
+
         message["timestamp"] = int(time.time() * 1000)
         dt = datetime.fromtimestamp(message['timestamp']/1000)
-        readabel = dt.strftime("%d %b %Y %H:%M:%S")
-
+        readable = dt.strftime("%d %b %Y %H:%M:%S")
         message["from"] = addr[0]
 
         if isinstance(message, dict) and isinstance(message.get("msg"), str):
-            await loop.run_in_executor(None, store_message, message, json.dumps(message))
-                    
+            if self.message_callback:
+                await self.message_callback(message)
+                
             if has_console:
-               print(f"{readabel} {message['src_type']} von {addr[0]}: {message}")
+                print(f"{readable} {message['src_type']} von {addr[0]}: {message}")
 
-        async with clients_lock:
-                targets = list(clients)
+    async def send_message(self, message_data):
+        try:
+            udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            loop = asyncio.get_running_loop()
+            
+            json_data = json.dumps(message_data).encode("utf-8")
+            await loop.run_in_executor(None, udp_sock.sendto, json_data, self.target_address)
+            
+            if has_console:
+                print(f"UDP message sent to {self.target_address}: {message_data}")
+                
+        except Exception as e:
+            print(f"Error sending UDP message: {e}")
+        finally:
+            udp_sock.close()
+            
+    def is_running(self):
+        return self._running
 
-        if targets:
-            send_tasks = [asyncio.create_task(client.send(json.dumps(message))) for client in targets]
-            await asyncio.gather(*send_tasks, return_exceptions=True)
+async def handle_udp_message(message):
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, store_message, message, json.dumps(message))
+    
+    async with clients_lock:
+        targets = list(clients)
+    
+    if targets:
+        send_tasks = [asyncio.create_task(client.send(json.dumps(message))) for client in targets]
+        await asyncio.gather(*send_tasks, return_exceptions=True)
 
-    except asyncio.CancelledError: 
-        print("udp_listener shutting down. Closing socket.")
-    finally:
-        udp_sock.close()
-
-async def websocket_handler(websocket):
+#async def websocket_handler(websocket):
+async def websocket_handler_with_udp(websocket, udp_handler):
     peer = websocket.remote_address[0] if websocket.remote_address else "unbekannt"
     print(f"WebSocket verbunden von IP {peer}")
     async with clients_lock:
@@ -221,11 +330,13 @@ async def websocket_handler(websocket):
                    await client.send_message(data.get("msg"), data.get("dst"))
 
                 else:
-                   udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                   loop = asyncio.get_running_loop()
-                   await loop.run_in_executor(None, udp_sock.sendto,
-                                              json.dumps(data).encode("utf-8"),
-                                              UDP_TARGET)
+                   #udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                   #loop = asyncio.get_running_loop()
+                   #await loop.run_in_executor(None, udp_sock.sendto,
+                   #                           json.dumps(data).encode("utf-8"),
+                   #                           UDP_TARGET)
+                   await udp_handler.send_message(data)
+
 
             except json.JSONDecodeError:
                 print(f"Fehler: Ungültiges JSON über WebSocket empfangen: {message}")
@@ -504,36 +615,36 @@ async def backend_resolve_ip(hostname):
         await blueZ_bubble("resolve-ip", "error", str(e)) 
 
 
-def mac_to_dbus_path(mac):
-    return f"/org/bluez/hci0/dev_{mac.replace(':', '_')}"
+#def mac_to_dbus_path(mac):
+#    return f"/org/bluez/hci0/dev_{mac.replace(':', '_')}"
 
-async def find_gatt_characteristic(bus, path, target_uuid):
-     try:
-        introspect = await bus.introspect(BLUEZ_SERVICE_NAME, path)
-     except Exception as e:
-        return None, None
+#async def find_gatt_characteristic(bus, path, target_uuid):
+#     try:
+#        introspect = await bus.introspect(BLUEZ_SERVICE_NAME, path)
+#     except Exception as e:
+#        return None, None
+#
+#     for node in introspect.nodes:
+#        child_path = f"{path}/{node.name}"
+#        try:
+#            child_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, child_path, await bus.introspect(BLUEZ_SERVICE_NAME, child_path))
+#
+#            props_iface = child_obj.get_interface(PROPERTIES_INTERFACE)
+#
+#            props = await props_iface.call_get_all(GATT_CHARACTERISTIC_INTERFACE)
+#
+#            uuid = props.get("UUID").value.lower()
+#            if uuid == target_uuid.lower():
+#                char_iface = child_obj.get_interface(GATT_CHARACTERISTIC_INTERFACE)
+#                return child_obj, char_iface
 
-     for node in introspect.nodes:
-        child_path = f"{path}/{node.name}"
-        try:
-            child_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, child_path, await bus.introspect(BLUEZ_SERVICE_NAME, child_path))
-
-            props_iface = child_obj.get_interface(PROPERTIES_INTERFACE)
-
-            props = await props_iface.call_get_all(GATT_CHARACTERISTIC_INTERFACE)
-
-            uuid = props.get("UUID").value.lower()
-            if uuid == target_uuid.lower():
-                char_iface = child_obj.get_interface(GATT_CHARACTERISTIC_INTERFACE)
-                return child_obj, char_iface
-
-        except Exception:
-            # Falls keine Properties oder keine GattCharacteristic1, rekursiv weitersuchen
-            obj, iface = await find_gatt_characteristic(bus, child_path, target_uuid)
-            if iface:
-                return obj, iface  # ❗beides weitergeben
-
-     return None, None
+#        except Exception:
+#            # Falls keine Properties oder keine GattCharacteristic1, rekursiv weitersuchen
+#            obj, iface = await find_gatt_characteristic(bus, child_path, target_uuid)
+#            if iface:
+#                return obj, iface  # ❗beides weitergeben
+#
+#     return None, None
 
 class BLEClient:
     def __init__(self, mac, read_uuid, write_uuid, hello_bytes=None):
@@ -541,7 +652,7 @@ class BLEClient:
         self.read_uuid = read_uuid
         self.write_uuid = write_uuid
         self.hello_bytes = hello_bytes or b'\x00'
-        self.path = mac_to_dbus_path(mac)
+        self.path = self._mac_to_dbus_path(mac)
         self.bus = None
         self.device_obj = None
         self.dev_iface = None
@@ -553,6 +664,41 @@ class BLEClient:
         self._connect_lock = asyncio.Lock()
         self._connected = False
         self._keepalive_task = None
+        self._time_sync = None
+
+    def _mac_to_dbus_path(self, mac):
+        """Convert MAC address to D-Bus device path"""
+        return f"/org/bluez/hci0/dev_{mac.replace(':', '_')}"
+
+
+    async def _find_gatt_characteristic(self, bus, path, target_uuid):
+        """Find GATT characteristic by UUID in the device tree"""
+        try:
+            introspect = await bus.introspect(BLUEZ_SERVICE_NAME, path)
+        except Exception as e:
+            return None, None
+
+        for node in introspect.nodes:
+            child_path = f"{path}/{node.name}"
+            try:
+                child_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, child_path, 
+                                                await bus.introspect(BLUEZ_SERVICE_NAME, child_path))
+
+                props_iface = child_obj.get_interface(PROPERTIES_INTERFACE)
+                props = await props_iface.call_get_all(GATT_CHARACTERISTIC_INTERFACE)
+
+                uuid = props.get("UUID").value.lower()
+                if uuid == target_uuid.lower():
+                    char_iface = child_obj.get_interface(GATT_CHARACTERISTIC_INTERFACE)
+                    return child_obj, char_iface
+
+            except Exception:
+                # Recursive search in child nodes
+                obj, iface = await self._find_gatt_characteristic(bus, child_path, target_uuid)
+                if iface:
+                    return obj, iface
+
+        return None, None
 
     async def connect(self):
       async with self._connect_lock:
@@ -627,17 +773,27 @@ class BLEClient:
 
         self._connected = True
         await blueZ_bubble('connect BLE result','ok', "connection established, downloading config ..")
+
+        print("▶️  Starting time sync task ..")
+        self._time_sync = TimeSyncTask(self._handle_timesync)
+        self._time_sync.start()
        
         print("▶️  Starting keep alive ..")
         if not self._keepalive_task or self._keepalive_task.done():
-                        self._keepalive_task = asyncio.create_task(self._send_keepalive())
+            self._keepalive_task = asyncio.create_task(self._send_keepalive())
                 
 
 
+#    async def _find_characteristics(self):
+#        self.read_char_obj, self.read_char_iface = await find_gatt_characteristic(
+#            self.bus, self.path, self.read_uuid)
+#        self.write_char_obj, self.write_char_iface = await find_gatt_characteristic(
+#            self.bus, self.path, self.write_uuid)
+
     async def _find_characteristics(self):
-        self.read_char_obj, self.read_char_iface = await find_gatt_characteristic(
+        self.read_char_obj, self.read_char_iface = await self._find_gatt_characteristic(
             self.bus, self.path, self.read_uuid)
-        self.write_char_obj, self.write_char_iface = await find_gatt_characteristic(
+        self.write_char_obj, self.write_char_iface = await self._find_gatt_characteristic(
             self.bus, self.path, self.write_uuid)
 
 
@@ -647,10 +803,6 @@ class BLEClient:
            if has_console:
               print("❌ Connection not established, start notify aborted")
            return
-
-        #if has_console:
-        #   print("▶️  Start notify ..")
-
 
         is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
         if is_notifying:
@@ -797,9 +949,6 @@ class BLEClient:
 
         await self._check_conn()
 
-        #if has_console:
-        #  print(f"✅ ready to send")
-
         byte_array = bytearray(cmd.encode('utf-8'))
 
         laenge = len(byte_array) + 2
@@ -819,7 +968,6 @@ class BLEClient:
        #--path -> gibts nichs
     async def set_commands(self, cmd):
        laenge = 0
-       #print("special commands, not yet implemented")
        
        if not self.bus:
           await blueZ_bubble('set command','error', f"❌ connection not established")
@@ -844,7 +992,6 @@ class BLEClient:
          if has_console:
             print(f"Aktuelle Zeit {now}")
             print("to hex:", ' '.join(f"{b:02X}" for b in byte_array))
-
 
 
 #       elif cmd == "--setCALL":
@@ -899,61 +1046,6 @@ class BLEClient:
             print("⚠️ Keine Write-Charakteristik verfügbar")
        
 
-#    async def monitor_connection(self):
-#        print("monitoring ..")
-#        if not self.bus:
-#            print("⚠️ Kein D-Bus verbunden")
-#            await blueZ_bubble('D-Bus','error', f"❌ kein D-Bus verbunden")
-#            return
-#
-#        def handle_properties_changed(message):
-#            #interface_name, changed_props, invalidated = message.body
-#
-#            #print(f"🌀 Props changed on {message.path}")
-#            #print(f"🔧 Interface: {interface_name}")
-#            #print(f"🧩 Changed Props:")
-#
-#            #for key, variant in changed_props.items():
-#            #    print(f"    {key} = {variant.signature} → {variant.value}")
-#
-#            if message.message_type != MessageType.SIGNAL:
-#                return
-#
-#            if message.interface != "org.freedesktop.DBus.Properties":
-#                return
-#            if message.member != "PropertiesChanged":
-#                return
-#            if message.path != self.path:
-#                return
-#
-#
-#
-#            print("35 monitoring ..")
-#
-#            if "Connected" in changed_props:
-#                connected = changed_props["Connected"].value
-#
-#
-#                print("40 monitoring ..")
-#
-#                if not connected and self._connected:
-#                    print(f"📴 Verbindung zu {self.mac} wurde unterbrochen!")
-#                    blueZ_bubble('Monitoring','error', f"❌ Monitor Verbindung zu {self.mac} unterbrochen")
-#                    self._connected = False
-#                    self.bus = None
-#                    # evtl. neu verbinden oder clean-up triggern
-#
-#                    #if self._keepalive_task:
-#                    #    self._keepalive_task.cancel()
-#                    #    self._keepalive_task = None
-#
-#                    blueZ_bubble('connectig','info', f"tryping to restore {self.mac}")
-#                    ble_connect(self.mac)
-#
-#        self.bus.add_message_handler(handle_properties_changed)
-#        if has_console:
-#           print(f"👂 Überwache BLE-Verbindung zu {self.mac}")
-
     async def _check_conn(self):
         connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
         if not connected:
@@ -1004,6 +1096,10 @@ class BLEClient:
               print("⬇️ disconnect ..")
             await blueZ_bubble('disconnect','info', "disconnecting ..")
 
+            if self._time_sync is not None:
+                await self._time_sync.stop()
+                self._time_sync = None
+
             if self._keepalive_task:
                self._keepalive_task.cancel()
                self._keepalive_task = None
@@ -1018,12 +1114,77 @@ class BLEClient:
             if has_console:
                print(f"⚠️ Disconnect fehlgeschlagen: {e}")
 
-
     async def close(self):
+        if self._time_sync is not None:
+            await self._time_sync.stop()
+            self._time_sync = None
+
         if self.bus:
             self.bus.disconnect()
         self.bus = None
         self._connected = False
+
+    async def _handle_timesync(self, lat, lon):
+        """Time sync handler that uses BLE client methods instead of global functions"""
+        if has_console:
+            print("adjusting time on node ..", lat, lon)
+        
+        await asyncio.sleep(3)
+        now = datetime.utcnow()
+        
+        if lon == 0 or lat == 0:
+            if has_console:
+                print("Lon/Lat not set, fallback on Raspberry Pi TZ info")
+            # Use local timezone
+            offset_sec = time.altzone if time.daylight and time.localtime().tm_isdst else time.timezone
+            offset = -offset_sec / 3600
+            tz_name = "Local"
+        else:
+            tz = get_timezone_info(lat, lon)
+            offset = tz.get("offset_hours")
+            tz_name = tz.get("timezone")
+
+        if has_console:
+            print("TZ UTC Offset", offset, "TZ name", tz_name)
+
+        print("Time offset detected, correcting time")
+        # Use instance methods instead of global handle_command
+        await self.a0_commands(f"--utcoff {offset}")
+        await asyncio.sleep(2)
+        await self.a0_commands("--settime")
+
+    def _should_trigger_time_sync(self, message_dict):
+        """Check if this GPS message should trigger time sync"""
+        if message_dict.get("TYP") != "G":
+            return False
+            
+        # Check if we have valid coordinates
+        lat = message_dict.get("LAT", 0)
+        lon = message_dict.get("LON", 0)
+        
+        if lat == 0 and lon == 0:
+            return False
+            
+        # Check time delta (reuse existing logic)
+        node_timestamp = safe_timestamp_from_dict(message_dict)
+        if node_timestamp is None:
+            return False
+            
+        time_delta = node_time_checker(node_timestamp, "G")
+        return abs(time_delta) > 8  # Same threshold as before
+
+    async def process_gps_message(self, message_dict):
+        """Process GPS message and trigger time sync if needed - called from notification_handler"""
+        if self._should_trigger_time_sync(message_dict):
+            lat = message_dict.get("LAT")
+            lon = message_dict.get("LON")
+            
+            if self._time_sync is not None:
+                self._time_sync.trigger(lat, lon)
+            else:
+                print("Warning: time_sync not initialized")
+
+
 
     def _normalize_variant(self,value):
       if isinstance(value, Variant):
@@ -1204,7 +1365,9 @@ class NoInputNoOutputAgent(ServiceInterface):
 
 
 async def ble_pair(mac, BLE_Pin):
-    path = mac_to_dbus_path(mac)
+    #path = mac_to_dbus_path(mac)
+    path = f"/org/bluez/hci0/dev_{mac.replace(':', '_')}"
+
     bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
 
     # Register agent
@@ -1267,7 +1430,8 @@ async def ble_unpair(mac):
     if has_console:
        print(f"🧹 Unpairing {mac} using blueZ ...")
 
-    device_path = mac_to_dbus_path(mac)
+    #device_path = mac_to_dbus_path(mac)
+    device_path = f"/org/bluez/hci0/dev_{mac.replace(':', '_')}"
     adapter_path = "/org/bluez/hci0"
 
     bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
@@ -1293,7 +1457,6 @@ async def ble_unpair(mac):
 
 async def ble_connect(MAC):
     global client  # we are assigning to global
-    global time_sync
 
     if client is None:
         client = BLEClient(
@@ -1307,8 +1470,8 @@ async def ble_connect(MAC):
       await client.connect()
 
       if client._connected:
-        time_sync = TimeSyncTask(handle_timesync)
-        time_sync.start()
+        #time_sync = TimeSyncTask(handle_timesync)
+        #time_sync.start()
 
         await client.start_notify()
 
@@ -1327,9 +1490,7 @@ async def ble_disconnect():
     
     print("debug: in ble disconnect")
     if client._connected: 
-      if time_sync is not None:
-        await time_sync.stop()
-      print("debug: time_sync.stop")
+
       await client.disconnect()
       print("debug: past client.discnnect")
       await client.close()
@@ -1409,6 +1570,8 @@ async def notification_handler(clean_msg):
              await ws_send_json(var)
 
            elif typ == "G": # GPS Info
+             if client and client._connected:
+                 await client.process_gps_message(var)
              await ws_send_json(var)
 
            elif typ == "W": # Wetter Info
@@ -1731,7 +1894,6 @@ def timestamp_from_date_time(date, time):
     return int(dt.timestamp() * 1000)
 
 def node_time_checker(node_timestamp, typ = ""):
-    #print("node time checker")
     current_time = int(time.time() * 1000)  # current time in ms
 
     time_delta_ms = current_time - node_timestamp
@@ -1774,7 +1936,6 @@ def node_time_checker(node_timestamp, typ = ""):
 
 def transform_common_fields(input_dict):
     node_timestamp = input_dict.get("time_ms")
-    #node_time_checker(node_timestamp)
     return {
         "transformer1": "common_fields",
         "src_type": "ble",
@@ -1784,10 +1945,10 @@ def transform_common_fields(input_dict):
         "mesh_info": input_dict.get("mesh_info"),
         "lora_mod": input_dict.get("lora_mod"),
         "last_hw": input_dict.get("lasthw"),
-        #"node_timestamp": node_timestamp,
         "uptime_ms": node_timestamp,
         "timestamp": int(time.time() * 1000),
     }
+        #"node_timestamp": node_timestamp,
 
 def transform_msg(input_dict):
     return {
@@ -1828,7 +1989,6 @@ def transform_pos(input_dict):
 
 def transform_mh(input_dict):
     node_timestamp = timestamp_from_date_time(input_dict["DATE"], input_dict["TIME"])
-    #node_time_checker(node_timestamp)
     return {
         "transformer": "mh",
         "src_type": "ble",
@@ -1841,7 +2001,6 @@ def transform_mh(input_dict):
         "pl": input_dict.get("PL"),
         "mesh": input_dict.get("MESH"),
         "node_timestamp": node_timestamp,
-        #"timestamp": int(time.time() * 1000)
         "timestamp": node_timestamp
     }
         #"msg": "",
@@ -1982,20 +2141,6 @@ async def handle_timesync (lat, lon):
 
 
 def transform_ble(input_dict):
-    typ = input_dict.get("TYP")
-    node_timestamp = safe_timestamp_from_dict(input_dict)
-    if node_timestamp is not None and typ == "G":
-      time_delta = node_time_checker(node_timestamp, typ)
-
-      if abs(time_delta) > 8:
-       lon = input_dict.get("LON")
-       lat = input_dict.get("LAT")
-      
-       if time_sync is not None:
-           time_sync.trigger(lat, lon)
-       else:
-           print("Warning: time_sync not initialized")
-
     return{
         "transformer": "generic_ble",
         "src_type": "BLE",
@@ -2073,12 +2218,25 @@ def dispatcher(input_dict):
     else:
         print(f"Unbekannter payload_type oder TYP: {input_dict}")
 
+
 async def main():
     load_dump()
     prune_messages()
 
+    udp_handler = UDPHandler(
+        listen_port=UDP_PORT_list,
+        target_host=config["UDP_TARGET"], 
+        target_port=UDP_PORT_send,
+        message_callback=handle_udp_message
+    )
+    async def websocket_handler(websocket):
+       return await websocket_handler_with_udp(websocket, udp_handler)
+    
+    await udp_handler.start_listening()
+
     try:
-      ws_server = await websockets.serve(websocket_handler, WS_HOST, WS_PORT)
+       ws_server = await websockets.serve(websocket_handler, WS_HOST, WS_PORT)
+
     except OSError as e:
         if e.errno == errno.EADDRINUSE:
             print(f"❌ Address {WS_HOST}:{WS_PORT} already in use.")
@@ -2089,7 +2247,7 @@ async def main():
         else:
             raise  # re-raise any other unexpected OSError
 
-    udp_task = asyncio.create_task(udp_listener())
+    #udp_task = asyncio.create_task(udp_listener())
 
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
@@ -2121,25 +2279,21 @@ async def main():
     print(f"WebSocket ws://{WS_HOST}:{WS_PORT}")
     print(f"UDP-Listen {UDP_PORT_list}, Target MeshCom {UDP_TARGET}")
 
-
     print("debug: await stop_event.wait")
     await stop_event.wait()
     print("debug: past await stop_event.wait")
-
-    print("Stopping mc node time sync ..")
-    if time_sync is not None:
-       await time_sync.stop()
-    print("debug: past Stopping mc node time sync ..")
 
     print("Stopping proxy server, svaing to disc ..")
 
     await ble_disconnect()
     print("debug: past Stopping proxy server, svaing to disc ..")
 
-    print("debug: udp_task.cancel ..")
-    #await udp_task.cancel()
-    udp_task.cancel()
-    print("debug: past udp_task.cancel ..")
+    #print("debug: udp_task.cancel ..")
+    ##await udp_task.cancel()
+    #udp_task.cancel()
+    #print("debug: past udp_task.cancel ..")
+
+    await udp_handler.stop_listening()
 
     print("debug: ws_server.close ..")
     #await ws_server.close()
@@ -2156,7 +2310,7 @@ async def main():
 
 if __name__ == "__main__":
     client = None  # placeholder
-    time_sync = None
+
     BLUEZ_SERVICE_NAME = "org.bluez"
     AGENT_INTERFACE   = "org.bluez.Agent1"
     ADAPTER_INTERFACE = "org.bluez.Adapter1"
