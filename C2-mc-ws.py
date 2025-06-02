@@ -28,7 +28,7 @@ from dbus_next.service import ServiceInterface, method
 
 #from daily_sqlite_dumper import DailySQLiteDumper
 
-VERSION="v0.35.0"
+VERSION="v0.36.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -160,47 +160,6 @@ def store_message(message: dict, raw: str):
         removed = message_store.popleft()
         message_store_size -= len(json.dumps(removed).encode("utf-8"))
 
-#async def udp_listener():
-#    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-#    udp_sock.bind(("", UDP_PORT_list))
-#    udp_sock.setblocking(False)
-#
-#    loop = asyncio.get_running_loop()
-#    try: 
-#      while True:
-#        data, addr = await loop.sock_recvfrom(udp_sock, 1024)
-#
-#        text = strip_invalid_utf8(data)
-#
-#        message = try_repair_json(text)
-#
-#        if not message or "msg" not in message:
-#           print(f"no msg object found in json: {message}")
-#       
-#        message["timestamp"] = int(time.time() * 1000)
-#        dt = datetime.fromtimestamp(message['timestamp']/1000)
-#        readabel = dt.strftime("%d %b %Y %H:%M:%S")
-#
-#        message["from"] = addr[0]
-#
-#        if isinstance(message, dict) and isinstance(message.get("msg"), str):
-#            await loop.run_in_executor(None, store_message, message, json.dumps(message))
-#                    
-#            if has_console:
-#               print(f"{readabel} {message['src_type']} von {addr[0]}: {message}")
-#
-#        async with clients_lock:
-#                targets = list(clients)
-#
-#        if targets:
-#            send_tasks = [asyncio.create_task(client.send(json.dumps(message))) for client in targets]
-#            await asyncio.gather(*send_tasks, return_exceptions=True)
-#
-#    except asyncio.CancelledError: 
-#        print("udp_listener shutting down. Closing socket.")
-#    finally:
-#        udp_sock.close()
-
 class UDPHandler:
     def __init__(self, listen_port, target_host, target_port, message_callback=None):
         self.listen_port = listen_port
@@ -309,7 +268,6 @@ async def handle_udp_message(message):
         send_tasks = [asyncio.create_task(client.send(json.dumps(message))) for client in targets]
         await asyncio.gather(*send_tasks, return_exceptions=True)
 
-#async def websocket_handler(websocket):
 async def websocket_handler_with_udp(websocket, udp_handler):
     peer = websocket.remote_address[0] if websocket.remote_address else "unbekannt"
     print(f"WebSocket verbunden von IP {peer}")
@@ -330,11 +288,6 @@ async def websocket_handler_with_udp(websocket, udp_handler):
                    await client.send_message(data.get("msg"), data.get("dst"))
 
                 else:
-                   #udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                   #loop = asyncio.get_running_loop()
-                   #await loop.run_in_executor(None, udp_sock.sendto,
-                   #                           json.dumps(data).encode("utf-8"),
-                   #                           UDP_TARGET)
                    await udp_handler.send_message(data)
 
 
@@ -615,37 +568,6 @@ async def backend_resolve_ip(hostname):
         await blueZ_bubble("resolve-ip", "error", str(e)) 
 
 
-#def mac_to_dbus_path(mac):
-#    return f"/org/bluez/hci0/dev_{mac.replace(':', '_')}"
-
-#async def find_gatt_characteristic(bus, path, target_uuid):
-#     try:
-#        introspect = await bus.introspect(BLUEZ_SERVICE_NAME, path)
-#     except Exception as e:
-#        return None, None
-#
-#     for node in introspect.nodes:
-#        child_path = f"{path}/{node.name}"
-#        try:
-#            child_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, child_path, await bus.introspect(BLUEZ_SERVICE_NAME, child_path))
-#
-#            props_iface = child_obj.get_interface(PROPERTIES_INTERFACE)
-#
-#            props = await props_iface.call_get_all(GATT_CHARACTERISTIC_INTERFACE)
-#
-#            uuid = props.get("UUID").value.lower()
-#            if uuid == target_uuid.lower():
-#                char_iface = child_obj.get_interface(GATT_CHARACTERISTIC_INTERFACE)
-#                return child_obj, char_iface
-
-#        except Exception:
-#            # Falls keine Properties oder keine GattCharacteristic1, rekursiv weitersuchen
-#            obj, iface = await find_gatt_characteristic(bus, child_path, target_uuid)
-#            if iface:
-#                return obj, iface  # ❗beides weitergeben
-#
-#     return None, None
-
 class BLEClient:
     def __init__(self, mac, read_uuid, write_uuid, hello_bytes=None):
         self.mac = mac
@@ -754,8 +676,6 @@ class BLEClient:
 
         if not self.read_char_iface or not self.write_char_iface:
             print("❌ Charakteristika nicht gefunden")
-            #msg={ 'src_type': 'BLE', 'TYP': 'blueZ', 'command': 'connect', 'result': 'error', 'msg': "connection not established, not yet paired" }
-            #await ws_send(msg)
             await blueZ_bubble('connect BLE result','error', "❌ connection not established, not yet paired")
 
             self._connected = False
@@ -783,12 +703,6 @@ class BLEClient:
             self._keepalive_task = asyncio.create_task(self._send_keepalive())
                 
 
-
-#    async def _find_characteristics(self):
-#        self.read_char_obj, self.read_char_iface = await find_gatt_characteristic(
-#            self.bus, self.path, self.read_uuid)
-#        self.write_char_obj, self.write_char_iface = await find_gatt_characteristic(
-#            self.bus, self.path, self.write_uuid)
 
     async def _find_characteristics(self):
         self.read_char_obj, self.read_char_iface = await self._find_gatt_characteristic(
@@ -1102,6 +1016,10 @@ class BLEClient:
 
             if self._keepalive_task:
                self._keepalive_task.cancel()
+               try:
+                  await self._keepalive_task
+               except asyncio.CancelledError:
+                   pass
                self._keepalive_task = None
 
             await self.stop_notify()
@@ -1171,7 +1089,7 @@ class BLEClient:
             return False
             
         time_delta = node_time_checker(node_timestamp, "G")
-        return abs(time_delta) > 8  # Same threshold as before
+        return abs(time_delta) > 60  # Same threshold as before
 
     async def process_gps_message(self, message_dict):
         """Process GPS message and trigger time sync if needed - called from notification_handler"""
@@ -1470,8 +1388,6 @@ async def ble_connect(MAC):
       await client.connect()
 
       if client._connected:
-        #time_sync = TimeSyncTask(handle_timesync)
-        #time_sync.start()
 
         await client.start_notify()
 
@@ -1488,13 +1404,13 @@ async def ble_disconnect():
     if client is None:
       return
     
-    print("debug: in ble disconnect")
+    #print("debug: in ble disconnect")
     if client._connected: 
 
       await client.disconnect()
-      print("debug: past client.discnnect")
+      #print("debug: past client.discnnect")
       await client.close()
-      print("debug: past client.close")
+      #print("debug: past client.close")
       client = None
     else:
       await blueZ_bubble('disconnect BLE result','error', "can't disconnect, already discconnected")
@@ -1899,8 +1815,8 @@ def node_time_checker(node_timestamp, typ = ""):
     time_delta_ms = current_time - node_timestamp
     time_delta_s = time_delta_ms / 1000
 
-    if abs(time_delta_ms) > 5000:
-        print("⏱️ Time difference > 5 seconds")
+    if abs(time_delta_s) > 60:
+        print("⏱️ Time difference > 60 seconds")
         # Human-readable time
         current_dt = datetime.fromtimestamp(current_time / 1000)
         node_dt = datetime.fromtimestamp(node_timestamp / 1000)
@@ -2064,7 +1980,6 @@ class TimeSyncTask:
 
         self.lat = None
         self.lon = None
-        #self.time_delta = None
 
     def trigger(self, lat, lon):
         loop = asyncio.get_running_loop()
@@ -2073,7 +1988,6 @@ class TimeSyncTask:
     def _set_data(self, lat, lon):
         self.lat = lat
         self.lon = lon
-        #self.time_delta = time_delta
         self._event.set()
 
     async def runner(self):
@@ -2081,6 +1995,9 @@ class TimeSyncTask:
         while self._running:
             await self._event.wait()
             self._event.clear()
+
+            if not self._running:
+               break
 
             if None in (self.lat, self.lon):
                 print("Warning: missing input data, skipping task")
@@ -2097,9 +2014,13 @@ class TimeSyncTask:
 
     async def stop(self):
         self._running = False
-        self._event.set()  # unblock wait
-        if self._task:
-            await self._task  # make sure it finishes
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass  # Expected when we cancel
+        self._task = None
 
 async def handle_timesync (lat, lon):
        if has_console:
@@ -2279,34 +2200,26 @@ async def main():
     print(f"WebSocket ws://{WS_HOST}:{WS_PORT}")
     print(f"UDP-Listen {UDP_PORT_list}, Target MeshCom {UDP_TARGET}")
 
-    print("debug: await stop_event.wait")
+    #print("debug: await stop_event.wait")
     await stop_event.wait()
-    print("debug: past await stop_event.wait")
+    #print("debug: past await stop_event.wait")
 
     print("Stopping proxy server, svaing to disc ..")
 
     await ble_disconnect()
-    print("debug: past Stopping proxy server, svaing to disc ..")
-
-    #print("debug: udp_task.cancel ..")
-    ##await udp_task.cancel()
-    #udp_task.cancel()
-    #print("debug: past udp_task.cancel ..")
+    #print("debug: past Stopping proxy server, svaing to disc ..")
 
     await udp_handler.stop_listening()
 
-    print("debug: ws_server.close ..")
-    #await ws_server.close()
     ws_server.close()
-    print("debug: past ws_server.close ..")
 
     with open(store_file_name, "w", encoding="utf-8") as f:
         json.dump(list(message_store), f, ensure_ascii=False, indent=2)
     print("stored message data.")
 
-    print("warten auf close.")
+    print("warten auf close ..")
     await ws_server.wait_closed()
-    print("debug: past warten auf close.")
+    #print("debug: past warten auf close.")
 
 if __name__ == "__main__":
     client = None  # placeholder
