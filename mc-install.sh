@@ -17,12 +17,23 @@ STATE_FILE="/var/log/install-webapp/state.json"
 INSTALL_DIR="/var/www/html/webapp"
 latest_tag=$(curl -s https://api.github.com/repos/DK5EN/McAdvChat/releases/latest | jq -r .tag_name)
 #latest_tag=$(curl -H "Authorization: token $GITHUB_TOKEN" -s https://api.github.com/repos/DK5EN/McAdvChat/releases/latest | jq -r .tag_name)
+
 RELEASE_URL="https://github.com/DK5EN/McAdvChat/releases/download/${latest_tag}/dist.tar.gz"
 PY_SCRIPT_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/C2-mc-ws.py"
 SH_SCRIPT_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-screen.sh"
 PY_FILE="/usr/local/bin/C2-mc-ws.py"
 SH_FILE="/usr/local/bin/mc-screen.sh"
-SCRIPT_VERSION="v0.1.0"
+SCRIPT_VERSION="v0.2.0"
+
+MS_LIB="/usr/local/bin/message_storage.py"
+MS_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/message_storage.py"
+UDP_LIB="/usr/local/bin/udp_handler.py"
+UDP_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/udp_handler.py"
+WS_LIB="/usr/local/bin/websocket_handler.py"
+WS_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/websocket_handler.py"
+
+BLE_LIB="/usr/local/bin/ble_handler.py"
+BLE_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/ble_handler.py"
 
 
 # --- Sudo-Handling ---
@@ -93,14 +104,34 @@ log "Lokale Python-Skript-Version: $PY_LOCAL_VERSION"
 log "Lokale Shell-Skript-Version: $SH_LOCAL_VERSION"
 log "Install-Skript-Version: $SCRIPT_VERSION"
 
+MS_LOCAL_VERSION=$(get_local_version_file "$MS_LIB")
+UDP_LOCAL_VERSION=$(get_local_version_file "$UDP_LIB")
+WS_LOCAL_VERSION=$(get_local_version_file "$WS_LIB")
+BLE_LOCAL_VERSION=$(get_local_version_file "$BLE_LIB")
+
+log "Lokale Python-MessageStore-Version: $MS_LOCAL_VERSION"
+log "Lokale Python-UDP-Version: $UDP_LOCAL_VERSION"
+log "Lokale Python-WebSocket-Version: $WS_LOCAL_VERSION"
+log "Lokale Python-Bluetooth-Version: $BLE_LOCAL_VERSION"
+
 # --- Remote Versionen ---
 WEBAPP_REMOTE_VERSION=$(get_latest_webapp_version)
 PY_REMOTE_VERSION=$(get_remote_script_version "$PY_SCRIPT_URL")
 SH_REMOTE_VERSION=$(get_remote_script_version "$SH_SCRIPT_URL")
 
+MS_REMOTE_VERSION=$(get_remote_script_version "$MS_LIB_URL")
+UDP_REMOTE_VERSION=$(get_remote_script_version "$UDP_LIB_URL")
+WS_REMOTE_VERSION=$(get_remote_script_version "$WS_LIB_URL")
+BLE_REMOTE_VERSION=$(get_remote_script_version "$BLE_LIB_URL")
+
 log "Remote WebApp-Version: $WEBAPP_REMOTE_VERSION"
 log "Remote Python-Skript-Version: $PY_REMOTE_VERSION"
 log "Remote Shell-Skript-Version: $SH_REMOTE_VERSION"
+
+log "Remote Python-MessageStore-Version: $MS_REMOTE_VERSION"
+log "Remote Python-UDP-Version: $UDP_REMOTE_VERSION"
+log "Remote Python-WebSocket-Version: $WS_REMOTE_VERSION"
+log "Remote Python-Bluetooth-Version: $BLE_REMOTE_VERSION"
 
 # --- WebApp Update ---
 if version_gt "$WEBAPP_REMOTE_VERSION" "$WEBAPP_LOCAL_VERSION"; then
@@ -121,6 +152,34 @@ if version_gt "$PY_REMOTE_VERSION" "$PY_LOCAL_VERSION"; then
   chmod +x "$PY_FILE"
 fi
 
+# --- Python-MessageStore-Lib Update ---
+if version_gt "$MS_REMOTE_VERSION" "$MS_LOCAL_VERSION"; then
+  log "Aktualisiere Python-MessageStore-Lib von $MS_LOCAL_VERSION auf $MS_REMOTE_VERSION"
+  curl -fsSL "$MS_LIB_URL" -o "$MS_LIB"
+  chmod +x "$MS_LIB"
+fi
+
+# --- Python-UDP-Lib Update ---
+if version_gt "$UDP_REMOTE_VERSION" "$UDP_LOCAL_VERSION"; then
+  log "Aktualisiere Python-UDP-Lib von $UDP_LOCAL_VERSION auf $UDP_REMOTE_VERSION"
+  curl -fsSL "$UDP_LIB_URL" -o "$UDP_LIB"
+  chmod +x "$UDP_LIB"
+fi
+
+# --- Python-WebSocket-Lib Update ---
+if version_gt "$WS_REMOTE_VERSION" "$WS_LOCAL_VERSION"; then
+  log "Aktualisiere Python-WebSocket-Lib von $WS_LOCAL_VERSION auf $WS_REMOTE_VERSION"
+  curl -fsSL "$WS_LIB_URL" -o "$WS_LIB"
+  chmod +x "$WS_LIB"
+fi
+
+# --- Python-WebSocket-Lib Update ---
+if version_gt "$BLE_REMOTE_VERSION" "$BLE_LOCAL_VERSION"; then
+  log "Aktualisiere Python-Bluetooth-Lib von $BLE_LOCAL_VERSION auf $BLE_REMOTE_VERSION"
+  curl -fsSL "$BLE_LIB_URL" -o "$BLE_LIB"
+  chmod +x "$BLE_LIB"
+fi
+
 # --- Shell-Skript Update ---
 if version_gt "$SH_REMOTE_VERSION" "$SH_LOCAL_VERSION"; then
   log "Aktualisiere Shell-Skript von $SH_LOCAL_VERSION auf $SH_REMOTE_VERSION"
@@ -132,7 +191,6 @@ fi
 log "Reloade Webserver ..."
 systemctl restart lighttpd || warn "Neustart fehlgeschlagen, versuche Reload"
 sleep 2 #give some time to start
-#systemctl reload lighttpd || error "Reload von lighttpd fehlgeschlagen"
 
 # --- Funktionstest ---
 HOSTNAME=$(hostname -s)
@@ -157,7 +215,6 @@ if [[ "$VERSION_CHECK" == "$WEBAPP_REMOTE_VERSION" ]]; then
 else
   warn "Version nicht verifiziert oder Seite nicht erreichbar ($VERSION_CHECK)"
 fi
-
 
 # --- State speichern ---
 jq -n --arg wa "$WEBAPP_REMOTE_VERSION" \
