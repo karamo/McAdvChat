@@ -134,14 +134,13 @@ def decode_binary_message(byte_msg):
             "max_hop": max_hop,
             "mesh_info": mesh_info,
             "message": message,
-            "ack_id": ack_id,  # Die Original Message ID die bestätigt wird
+            "ack_id": ack_id,
             "ack_type": ack_type,
             "ack_type_text": ack_type_text,
             "server_flag": server_flag,
             "hop_count": hop_count,
             "gateway_id": gateway_id,
-            "ack_id_part": ack_id_part,
-            "calced_fcs": calced_fcs
+            "ack_id_part": ack_id_part
         }
 
         # Entferne None-Werte für sauberere JSON
