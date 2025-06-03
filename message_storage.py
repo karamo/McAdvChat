@@ -4,8 +4,11 @@ import time
 from collections import deque, defaultdict
 from datetime import datetime, timedelta
 from statistics import mean
+import sys
 
 VERSION="v0.37.0"
+
+has_console = sys.stdout.isatty()
 
 # Constants for message storage
 BUCKET_SECONDS = 5 * 60
@@ -102,7 +105,8 @@ class MessageStorageHandler:
         
         # Filter conditions
         if msg_content.startswith("{CET}"):
-            print(msg_content)
+            if has_console:
+               print(msg_content)
             return True
             
         if src_type == "BLE":
