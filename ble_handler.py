@@ -94,7 +94,9 @@ def decode_binary_message(byte_msg):
     if byte_msg[:2] == b'@A':  # Prüfen, ob es sich um ACK Frames handelt
 
        #remaining_msg = byte_msg[8:].rstrip(b'\x00')  # Alles nach Hop
-       message = remaining_msg.hex().upper()
+       [message] = unpack(f'<{len(remaining_msg)}s', remaining_msg)
+       message = message.hex().upper()
+       #message = remaining_msg.hex().upper()
 
        #Etwas bit banging, weil die Binaerdaten am Ende immer gleich aussehen
        [ack_id] = unpack('<I', byte_msg[-5:-1])
@@ -1389,6 +1391,14 @@ async def backend_resolve_ip(hostname, message_router=None):
 def get_ble_client():
     """Get the current BLE client instance"""
     return client
+
+async def handle_ble_message(msg, grp):
+    """Handle messages through global client"""
+    global client
+    if client is not None:
+        await client.send_message(msg, grp)
+    else:
+        print("BLE client not connected")
 
 
 async def handle_a0_command(command):

@@ -6,7 +6,7 @@ from websocket_handler import WebSocketManager
 from ble_handler import (
     ble_connect, ble_disconnect, ble_pair, ble_unpair,
     scan_ble_devices, backend_resolve_ip, get_ble_client,
-    handle_a0_command, handle_set_command
+    handle_a0_command, handle_set_command, handle_ble_message
 )
 
 import asyncio
@@ -1669,7 +1669,7 @@ class MessageRouter:
 
     async def _ble_message_handler(self, routed_message):
         """Handle BLE messages from WebSocket and route to BLE client"""
-        global client
+        #global client
         
         message_data = routed_message['data']
         msg = message_data.get('msg')
@@ -1678,32 +1678,33 @@ class MessageRouter:
         if has_console:
             print(f"📱 BLE Message Handler: Sending '{msg}' to '{dst}'")
             
-        if client and client._connected:
-            try:
-                await client.send_message(msg, dst)
-                if has_console:
-                    print(f"📱 BLE message sent successfully")
-            except Exception as e:
-                print(f"📱 BLE message send failed: {e}")
-                # Optionally publish error status
-                await self.publish('ble', 'ble_status', {
-                    'src_type': 'BLE',
-                    'TYP': 'blueZ',
-                    'command': 'send_message',
-                    'result': 'error',
-                    'msg': f"Failed to send message: {e}",
-                    'timestamp': int(time.time() * 1000)
-                })
-        else:
-            print(f"📱 BLE client not connected, can't send message")
-            await self.publish('ble', 'ble_status', {
-                'src_type': 'BLE',
-                'TYP': 'blueZ', 
-                'command': 'send_message',
-                'result': 'error',
-                'msg': "BLE client not connected",
-                'timestamp': int(time.time() * 1000)
-            })
+        await handle_ble_message(msg, dst) 
+        #if client and client._connected:
+        #    try:
+        #        await client.send_message(msg, dst)
+        #        if has_console:
+        #            print(f"📱 BLE message sent successfully")
+        #    except Exception as e:
+        #        print(f"📱 BLE message send failed: {e}")
+        #        # Optionally publish error status
+        #        await self.publish('ble', 'ble_status', {
+        #            'src_type': 'BLE',
+        #            'TYP': 'blueZ',
+        #            'command': 'send_message',
+        #            'result': 'error',
+        #            'msg': f"Failed to send message: {e}",
+        #            'timestamp': int(time.time() * 1000)
+        #        })
+        #else:
+        #    print(f"📱 BLE client not connected, can't send message")
+        #    await self.publish('ble', 'ble_status', {
+        #        'src_type': 'BLE',
+        #        'TYP': 'blueZ', 
+        #        'command': 'send_message',
+        #        'result': 'error',
+        #        'msg': "BLE client not connected",
+        #        'timestamp': int(time.time() * 1000)
+        #    })
        
 
     async def _storage_handler(self, routed_message):
