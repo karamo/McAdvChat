@@ -1886,7 +1886,7 @@ class MessageRouter:
     # BLE command handlers
     async def _handle_ble_scan_command(self):
         """Handle BLE scan command"""
-        print("_handle_ble_scan_command")
+        #print("_handle_ble_scan_command")
         await scan_ble_devices(message_router=self)
 
     async def _handle_ble_info_command(self):

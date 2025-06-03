@@ -16,6 +16,8 @@ from dbus_next.service import ServiceInterface, method
 
 VERSION="v0.37.0"
 
+has_console = sys.stdout.isatty()
+
 # DBus constants
 BLUEZ_SERVICE_NAME = "org.bluez"
 AGENT_INTERFACE = "org.bluez.Agent1"
@@ -1047,7 +1049,7 @@ class BLEClient:
 
     async def scan_ble_devices(self, timeout=5.0):
       #Helper function
-      print("async dev scan_ble_devices")
+      #print("async dev scan_ble_devices")
       async def _interfaces_added(path, interfaces):
         if DEVICE_INTERFACE in interfaces:
             props = interfaces[DEVICE_INTERFACE]
@@ -1128,11 +1130,13 @@ class BLEClient:
 
       await self.adapter.call_stop_discovery()
 
-      print(f"\n✅ Scan complete. Not paired {len(self.found_devices)} device(s)")
+      if has_console:
+        print(f"\n✅ Scan complete. Not paired {len(self.found_devices)} device(s)")
       await self._publish_status('scan BLE', 'info', f"✅ Scan complete. Not paired {len(self.found_devices)} device(s)")
 
       for path, (name, addr, rssi) in self.found_devices.items():
-          print(f"🔹 {name} | Address: {addr} | RSSI: {rssi}")
+          if has_console:
+             print(f"🔹 {name} | Address: {addr} | RSSI: {rssi}")
 
       self.found_devices["TYP"] = "blueZunKnown"
       msg=transform_ble(self._normalize_variant(self.found_devices))
@@ -1344,7 +1348,7 @@ async def ble_disconnect(message_router=None):
 
 
 async def scan_ble_devices(message_router=None):
-    print("outside scan_ble_devices")
+    #print("outside scan_ble_devices")
     scanclient = BLEClient(
         mac ="",
         read_uuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e",
