@@ -3,8 +3,11 @@ import asyncio
 import json
 import time
 import websockets
+import sys
 
 VERSION="v0.37.0"
+
+has_console = sys.stdout.isatty()
 
 
 class WebSocketManager:
@@ -35,7 +38,8 @@ class WebSocketManager:
             try:
                 json_message = json.dumps(data)
                 await websocket.send(json_message)
-                print(f"📡 WebSocketManager: Direct send to client successful")
+                if has_console:
+                  print(f"📡 WebSocketManager: Direct send to client successful")
             except Exception as e:
                 print(f"📡 WebSocketManager: Direct send failed: {e}")
         else:
@@ -51,7 +55,8 @@ class WebSocketManager:
         #msg_preview = message_data.get('msg', str(message_data))[:50]
     
         #print(f"📡 WebSocketManager: Broadcasted {routed_message['type']} from {routed_message['source']}: {msg_preview}...")
-        print(f"📡 WebSocketManager: Broadcasted {routed_message['type']} from {routed_message['source']}: {message_data}...")
+        if has_console:
+          print(f"📡 WebSocketManager: Broadcasted {routed_message['type']} from {routed_message['source']}: {message_data}...")
             
     async def broadcast_message(self, message):
         """Broadcast message to all connected WebSocket clients"""
@@ -101,7 +106,8 @@ class WebSocketManager:
             async for message in websocket:
                 try:
                     data = json.loads(message)
-                    print(f"📡 WebSocketManager: Received from {peer}: {data}")
+                    if has_console:
+                      print(f"📡 WebSocketManager: Received from {peer}: {data}")
                         
                     await self._process_client_message(data, websocket, peer)
                     
