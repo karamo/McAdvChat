@@ -92,25 +92,81 @@ def decode_binary_message(byte_msg):
     remaining_msg = byte_msg[7:].rstrip(b'\x00')  # Alles nach Hop
 
     if byte_msg[:2] == b'@A':  # Prüfen, ob es sich um ACK Frames handelt
+        # ACK Message Format: [0x41] [MSG_ID-4] [FLAGS] [ACK_MSG_ID-4] [ACK_TYPE] [0x00]
+        
+        # FLAGS byte (max_hop_raw) dekodieren
+        server_flag = bool(max_hop_raw & 0x80)  # Bit 7: Server Flag
+        hop_count = max_hop_raw & 0x7F  # Bits 0-6: Hop Count
+        
+        # ACK spezifische Felder extrahieren
+        if len(byte_msg) >= 12:
+            # ACK_MSG_ID (die Original Message ID die bestätigt wird)
+            [ack_id] = unpack('<I', byte_msg[6:10])
+            
+            # ACK_TYPE
+            ack_type = byte_msg[10] if len(byte_msg) > 10 else 0
+            ack_type_text = "Node ACK" if ack_type == 0x00 else "Gateway ACK" if ack_type == 0x01 else f"Unknown ({ack_type})"
+            
+            # Gateway ID und ACK ID aus der msg_id extrahieren (wenn es ein Gateway ACK ist)
+            if ack_type == 0x01:
+                gateway_id = (msg_id >> 10) & 0x3FFFFF  # Bits 31-10: Gateway ID (22 Bits)
+                ack_id_part = msg_id & 0x3FF  # Bits 9-0: ACK ID (10 Bits)
+            else:
+                gateway_id = None
+                ack_id_part = None
+        else:
+            # Fallback für alte Implementierung
+            [ack_id] = unpack('<I', byte_msg[-5:-1])
+            ack_type = None
+            ack_type_text = None
+            server_flag = None
+            hop_count = max_hop
+            gateway_id = None
+            ack_id_part = None
 
-       #remaining_msg = byte_msg[8:].rstrip(b'\x00')  # Alles nach Hop
-       [message] = unpack(f'<{len(remaining_msg)}s', remaining_msg)
-       message = message.hex().upper()
-       #message = remaining_msg.hex().upper()
+        # Message als Hex darstellen
+        [message] = unpack(f'<{len(remaining_msg)}s', remaining_msg)
+        message = message.hex().upper()
 
-       #Etwas bit banging, weil die Binaerdaten am Ende immer gleich aussehen
-       [ack_id] = unpack('<I', byte_msg[-5:-1])
+        json_obj = {
+            "payload_type": payload_type,
+            "msg_id": msg_id,
+            "max_hop": max_hop,
+            "mesh_info": mesh_info,
+            "message": message,
+            "ack_id": ack_id,  # Die Original Message ID die bestätigt wird
+            "ack_type": ack_type,
+            "ack_type_text": ack_type_text,
+            "server_flag": server_flag,
+            "hop_count": hop_count,
+            "gateway_id": gateway_id,
+            "ack_id_part": ack_id_part,
+            "calced_fcs": calced_fcs
+        }
 
-       json_obj = {k: v for k, v in locals().items() if k in [
-          "payload_type",
-	        "msg_id",
-	        "max_hop",
-	        "mesh_info",
-	        "message",
-	        "ack_id",
-	        "calced_fcs" ]}
+        # Entferne None-Werte für sauberere JSON
+        json_obj = {k: v for k, v in json_obj.items() if v is not None}
 
-       return json_obj
+        return json_obj
+
+#       #remaining_msg = byte_msg[8:].rstrip(b'\x00')  # Alles nach Hop
+#       [message] = unpack(f'<{len(remaining_msg)}s', remaining_msg)
+#       message = message.hex().upper()
+#       #message = remaining_msg.hex().upper()
+#
+#       #Etwas bit banging, weil die Binaerdaten am Ende immer gleich aussehen
+#       [ack_id] = unpack('<I', byte_msg[-5:-1])
+#
+#       json_obj = {k: v for k, v in locals().items() if k in [
+#          "payload_type",
+#	        "msg_id",
+#	        "max_hop",
+#	        "mesh_info",
+#	        "message",
+#	        "ack_id",
+#	        "calced_fcs" ]}
+#
+#       return json_obj
 
     elif bytes(byte_msg[:2]) in {b'@:', b'@!'}:
 
@@ -352,7 +408,7 @@ def transform_ack(input_dict):
        "type": "ack",
        "msg_id": hex_msg_id(input_dict["msg_id"]),
        "msg": input_dict["message"],
-       "ack_id": hex_msg_id(input_dict["ack_id"]),
+        **input_dict,
        "timestamp": int(time.time() * 1000)
     } 
 
