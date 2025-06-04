@@ -234,8 +234,7 @@ def decode_binary_message(byte_msg):
           "fw", 
           "fw_subver", 
           "last_hw_id",
-          "last_sending",
-          "time_ms"
+          "last_sending"
           ]}
 
       return json_obj
@@ -344,9 +343,9 @@ def parse_aprs_position(message):
     result = {
         "transformer2": "APRS",
         "lat": round(lat, 4),
-        "lat_dir": lat_dir,
+        #"lat_dir": lat_dir,
         "long": round(lon, 4),
-        "long_dir": lon_dir,
+        #"long_dir": lon_dir,
         "aprs_symbol": symbol or "?",
         "aprs_symbol_group": symbol_group,
     }
@@ -374,7 +373,6 @@ def parse_aprs_position(message):
 
 
 def transform_common_fields(input_dict):
-    node_timestamp = input_dict.get("time_ms")
     return {
         "transformer1": "common_fields",
         "src_type": "ble",
@@ -383,8 +381,8 @@ def transform_common_fields(input_dict):
         "max_hop": input_dict.get("max_hop"),
         "mesh_info": input_dict.get("mesh_info"),
         "lora_mod": input_dict.get("lora_mod"),
-        "last_hw": input_dict.get("lasthw"),
-        "uptime_ms": node_timestamp,
+        "last_hw_id": input_dict.get("last_hw_id"),
+        "last_sending": input_dict.get("last_sending"),
         "timestamp": int(time.time() * 1000),
     }
 
@@ -442,7 +440,6 @@ def transform_mh(input_dict):
         "snr": input_dict.get("SNR"),
         "hw_id": input_dict.get("HW"),
         "lora_mod": input_dict.get("MOD"),
-        "pl": input_dict.get("PL"),
         "mesh": input_dict.get("MESH"),
         "node_timestamp": node_timestamp,
         "timestamp": node_timestamp
@@ -623,7 +620,7 @@ class TimeSyncTask:
 
 
 class BLEClient:
-    def __init__(self, mac, read_uuid, write_uuid, hello_bytes=None,  message_router=None):
+    def __init__(self, mac, read_uuid, write_uuid, hello_bytes=None, message_router=None):
         self.mac = mac
         self.read_uuid = read_uuid
         self.write_uuid = write_uuid
@@ -646,35 +643,6 @@ class BLEClient:
     def _mac_to_dbus_path(self, mac):
         """Convert MAC address to D-Bus device path"""
         return f"/org/bluez/hci0/dev_{mac.replace(':', '_')}"
-
-    async def _find_gatt_characteristic(self, bus, path, target_uuid):
-        """Find GATT characteristic by UUID in the device tree"""
-        try:
-            introspect = await bus.introspect(BLUEZ_SERVICE_NAME, path)
-        except Exception as e:
-            return None, None
-
-        for node in introspect.nodes:
-            child_path = f"{path}/{node.name}"
-            try:
-                child_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, child_path, 
-                                                await bus.introspect(BLUEZ_SERVICE_NAME, child_path))
-
-                props_iface = child_obj.get_interface(PROPERTIES_INTERFACE)
-                props = await props_iface.call_get_all(GATT_CHARACTERISTIC_INTERFACE)
-
-                uuid = props.get("UUID").value.lower()
-                if uuid == target_uuid.lower():
-                    char_iface = child_obj.get_interface(GATT_CHARACTERISTIC_INTERFACE)
-                    return child_obj, char_iface
-
-            except Exception:
-                # Recursive search in child nodes
-                obj, iface = await self._find_gatt_characteristic(bus, child_path, target_uuid)
-                if iface:
-                    return obj, iface
-
-        return None, None
 
     async def connect(self):
       async with self._connect_lock:
@@ -784,6 +752,35 @@ class BLEClient:
             self.bus, self.path, self.read_uuid)
         self.write_char_obj, self.write_char_iface = await self._find_gatt_characteristic(
             self.bus, self.path, self.write_uuid)
+
+    async def _find_gatt_characteristic(self, bus, path, target_uuid):
+        """Find GATT characteristic by UUID in the device tree"""
+        try:
+            introspect = await bus.introspect(BLUEZ_SERVICE_NAME, path)
+        except Exception as e:
+            return None, None
+
+        for node in introspect.nodes:
+            child_path = f"{path}/{node.name}"
+            try:
+                child_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, child_path, 
+                                                await bus.introspect(BLUEZ_SERVICE_NAME, child_path))
+
+                props_iface = child_obj.get_interface(PROPERTIES_INTERFACE)
+                props = await props_iface.call_get_all(GATT_CHARACTERISTIC_INTERFACE)
+
+                uuid = props.get("UUID").value.lower()
+                if uuid == target_uuid.lower():
+                    char_iface = child_obj.get_interface(GATT_CHARACTERISTIC_INTERFACE)
+                    return child_obj, char_iface
+
+            except Exception:
+                # Recursive search in child nodes
+                obj, iface = await self._find_gatt_characteristic(bus, child_path, target_uuid)
+                if iface:
+                    return obj, iface
+
+        return None, None
 
     async def start_notify(self, on_change=None):
         if not self._connected: 
@@ -1115,7 +1112,6 @@ class BLEClient:
 
     async def scan_ble_devices(self, timeout=5.0):
       #Helper function
-      #print("async dev scan_ble_devices")
       async def _interfaces_added(path, interfaces):
         if DEVICE_INTERFACE in interfaces:
             props = interfaces[DEVICE_INTERFACE]
@@ -1209,6 +1205,7 @@ class BLEClient:
       await self._send_to_websocket(msg)
 
       await self.close()
+      await asyncio.sleep(2)
 
 
 class NoInputNoOutputAgent(ServiceInterface):
@@ -1414,7 +1411,6 @@ async def ble_disconnect(message_router=None):
 
 
 async def scan_ble_devices(message_router=None):
-    #print("outside scan_ble_devices")
     scanclient = BLEClient(
         mac ="",
         read_uuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e",
