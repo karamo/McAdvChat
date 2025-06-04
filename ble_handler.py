@@ -148,25 +148,6 @@ def decode_binary_message(byte_msg):
 
         return json_obj
 
-#       #remaining_msg = byte_msg[8:].rstrip(b'\x00')  # Alles nach Hop
-#       [message] = unpack(f'<{len(remaining_msg)}s', remaining_msg)
-#       message = message.hex().upper()
-#       #message = remaining_msg.hex().upper()
-#
-#       #Etwas bit banging, weil die Binaerdaten am Ende immer gleich aussehen
-#       [ack_id] = unpack('<I', byte_msg[-5:-1])
-#
-#       json_obj = {k: v for k, v in locals().items() if k in [
-#          "payload_type",
-#	        "msg_id",
-#	        "max_hop",
-#	        "mesh_info",
-#	        "message",
-#	        "ack_id",
-#	        "calced_fcs" ]}
-#
-#       return json_obj
-
     elif bytes(byte_msg[:2]) in {b'@:', b'@!'}:
 
       split_idx = remaining_msg.find(b'>')
@@ -194,45 +175,67 @@ def decode_binary_message(byte_msg):
       #Etwas bit banging, weil die Binaerdaten am Ende immer gleich aussehen
       [zero, hardware_id, lora_mod, fcs, fw, lasthw, fw_subver, ending, time_ms ] = unpack('<BBBHBBBBI', byte_msg[-14:-1])
 
+
+      # lasthw aufteilen
+      last_hw_id = lasthw & 0x7F        # Bits 0-6: Hardware-Typ (0-127)
+      last_sending = bool(lasthw & 0x80) # Bit 7: Last Sending Flag (True/False)
+
       #Frame checksum checken
       fcs_ok = (calced_fcs == fcs)
 
-      if message.startswith(":{CET}"):
-        dest_type = "Datum & Zeit Broadcast an alle"
+      #if message.startswith(":{CET}"):
+      #  dest_type = "Datum & Zeit Broadcast an alle"
       
-      elif path.startswith("response"):
-        dest_type = "user input response"
+      #elif path.startswith("response"):
+      #  dest_type = "user input response"
 
-      elif message.startswith("!"):
-        dest_type = "Positionsmeldung"
+      #elif message.startswith("!"):
+      #  dest_type = "Positionsmeldung"
 
-      elif dest == "*":
-        dest_type = "Broadcast an alle"
+      #elif dest == "*":
+      #  dest_type = "Broadcast an alle"
 
-      elif dest.isdigit():
-        dest_type = f"Gruppennachricht an {dest}"
+      #elif dest.isdigit():
+      #  dest_type = f"Gruppennachricht an {dest}"
 
-      else:
-        dest_type = f"Direktnachricht an {dest}"
+      #else:
+      #  dest_type = f"Direktnachricht an {dest}"
+
+#      json_obj = {k: v for k, v in locals().items() if k in [
+#          "payload_type", 
+#          "msg_id",
+#          "max_hop",
+#          "mesh_info",
+#          "dest_type",
+#          "path",
+#          "dest",
+#          "message",
+#          "hardware_id", 
+#          "lora_mod", 
+#          "fcs", 
+#          "fcs_ok", 
+#          "fw", 
+#          "fw_subver", 
+#          "lasthw", 
+#          "time_ms",
+#          "ending" 
+#          ]}
 
       json_obj = {k: v for k, v in locals().items() if k in [
           "payload_type", 
           "msg_id",
           "max_hop",
           "mesh_info",
-          "dest_type",
           "path",
           "dest",
           "message",
           "hardware_id", 
           "lora_mod", 
-          "fcs", 
-          "fcs_ok", 
           "fw", 
           "fw_subver", 
-          "lasthw", 
-          "time_ms",
-          "ending" 
+          "last_hw_id",
+          "last_sending",
+          "time_ms"
           ]}
 
       return json_obj
@@ -375,8 +378,8 @@ def transform_common_fields(input_dict):
     return {
         "transformer1": "common_fields",
         "src_type": "ble",
-        "firmware": input_dict.get("fw"),
-        "fw_sub": ascii_char(input_dict.get("fw_subver")),
+        "firmware": str(input_dict.get("fw","")) + ascii_char(input_dict.get("fw_subver")),
+        "via": input_dict.get("path"),
         "max_hop": input_dict.get("max_hop"),
         "mesh_info": input_dict.get("mesh_info"),
         "lora_mod": input_dict.get("lora_mod"),
@@ -391,6 +394,7 @@ def transform_msg(input_dict):
         "transformer": "msg",
         "src_type": "ble",
         "type": "msg",
+        **input_dict,
         "src": input_dict["path"].rstrip(">"),
         "dst": input_dict["dest"],
         "msg": strip_prefix(input_dict["message"]),
@@ -405,9 +409,9 @@ def transform_ack(input_dict):
        "transformer": "ack",
        "src_type": "ble",
        "type": "ack",
-       "msg_id": hex_msg_id(input_dict["msg_id"]),
-       "msg": input_dict["message"],
-        **input_dict,
+       **input_dict,
+       "msg_id": format(input_dict.get("msg_id"), '08X'),
+       "ack_id": format(input_dict.get("ack_id"), '08X'),
        "timestamp": int(time.time() * 1000)
     } 
 
@@ -418,9 +422,10 @@ def transform_pos(input_dict):
         "transformer": "pos",
         "type": "pos",
         "src": input_dict["path"].rstrip(">"),
+        "via": input_dict.get("path"),
         "msg_id": hex_msg_id(input_dict["msg_id"]),
         "msg": input_dict["message"],
-        "hw_id": input_dict["hardware_id"],
+        "hw_id": input_dict.get("hardware_id"),
         **aprs,
         **transform_common_fields(input_dict)
     }
@@ -435,7 +440,7 @@ def transform_mh(input_dict):
         "src": input_dict["CALL"],
         "rssi": input_dict.get("RSSI"),
         "snr": input_dict.get("SNR"),
-        "hw_id": input_dict["HW"],
+        "hw_id": input_dict.get("HW"),
         "lora_mod": input_dict.get("MOD"),
         "pl": input_dict.get("PL"),
         "mesh": input_dict.get("MESH"),
@@ -474,6 +479,10 @@ def dispatcher(input_dict):
 
     elif input_dict.get("payload_type") == 65:
         return transform_ack(input_dict)
+        #print(json.dumps(input_dict, indent=2, ensure_ascii=False))
+        #transformed = transform_ack(input_dict)
+        #print(json.dumps(transformed, indent=2, ensure_ascii=False))
+        #return transformed
 
     else:
         print(f"Unbekannter payload_type oder TYP: {input_dict}")

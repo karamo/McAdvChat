@@ -51,12 +51,10 @@ class WebSocketManager:
         message_data = routed_message['data']
         await self.broadcast_message(message_data)
         
-        #msg_preview = str(message_data).get('msg', str(message_data))[:50]
-        #msg_preview = message_data.get('msg', str(message_data))[:50]
-    
-        #print(f"📡 WebSocketManager: Broadcasted {routed_message['type']} from {routed_message['source']}: {msg_preview}...")
+        truncated_data = str(message_data)[:80] + (".." if len(str(message_data)) > 80 else "")
+
         if has_console:
-          print(f"📡 WebSocketManager: Broadcasted {routed_message['type']} from {routed_message['source']}: {message_data}...")
+          print(f"📡 WebSocketManager: Broadcasted {routed_message['type']} from {routed_message['source']}: {truncated_data}")
             
     async def broadcast_message(self, message):
         """Broadcast message to all connected WebSocket clients"""
@@ -97,7 +95,8 @@ class WebSocketManager:
     async def _handle_connection(self, websocket):
         """Handle individual WebSocket client connections"""
         peer = websocket.remote_address[0] if websocket.remote_address else "unknown"
-        print(f"📡 WebSocketManager: Client connected from {peer}")
+        if has_console:
+           print(f"📡 WebSocketManager: Client connected from {peer}")
         
         async with self.clients_lock:
             self.clients.add(websocket)
