@@ -38,7 +38,7 @@ from collections import deque, defaultdict
 
 #from daily_sqlite_dumper import DailySQLiteDumper
 
-VERSION="v0.37.0"
+VERSION="v0.38.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")

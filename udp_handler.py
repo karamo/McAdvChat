@@ -5,7 +5,7 @@ import json
 import time
 import unicodedata
 
-VERSION="v0.37.0"
+VERSION="v0.38.0"
 
 
 def is_allowed_char(ch: str) -> bool:

@@ -5,7 +5,7 @@ import time
 import websockets
 import sys
 
-VERSION="v0.37.0"
+VERSION="v0.38.0"
 
 has_console = sys.stdout.isatty()
 

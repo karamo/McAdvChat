@@ -20,10 +20,10 @@ latest_tag=$(curl -s https://api.github.com/repos/DK5EN/McAdvChat/releases/lates
 
 RELEASE_URL="https://github.com/DK5EN/McAdvChat/releases/download/${latest_tag}/dist.tar.gz"
 PY_SCRIPT_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/C2-mc-ws.py"
-SH_SCRIPT_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-screen.sh"
+#SH_SCRIPT_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-screen.sh"
 PY_FILE="/usr/local/bin/C2-mc-ws.py"
-SH_FILE="/usr/local/bin/mc-screen.sh"
-SCRIPT_VERSION="v0.2.0"
+#SH_FILE="/usr/local/bin/mc-screen.sh"
+SCRIPT_VERSION="v0.3.0"
 
 MS_LIB="/usr/local/bin/message_storage.py"
 MS_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/message_storage.py"
@@ -99,12 +99,12 @@ version_gt() {
 # --- Lokale Versionen ---
 WEBAPP_LOCAL_VERSION=$(get_local_webapp_version)
 PY_LOCAL_VERSION=$(get_local_version_file "$PY_FILE")
-SH_LOCAL_VERSION=$(get_local_version_file "$SH_FILE")
+#SH_LOCAL_VERSION=$(get_local_version_file "$SH_FILE")
 SCRIPT_LOCAL_VERSION=$(get_local_version_file "$0")
 
 log "Lokale WebApp-Version: $WEBAPP_LOCAL_VERSION"
 log "Lokale Python-Skript-Version: $PY_LOCAL_VERSION"
-log "Lokale Shell-Skript-Version: $SH_LOCAL_VERSION"
+#log "Lokale Shell-Skript-Version: $SH_LOCAL_VERSION"
 log "Install-Skript-Version: $SCRIPT_VERSION"
 
 MS_LOCAL_VERSION=$(get_local_version_file "$MS_LIB")
@@ -122,7 +122,7 @@ log "Lokale Python-MagicWord-Version: $MAGIC_LOCAL_VERSION"
 # --- Remote Versionen ---
 WEBAPP_REMOTE_VERSION=$(get_latest_webapp_version)
 PY_REMOTE_VERSION=$(get_remote_script_version "$PY_SCRIPT_URL")
-SH_REMOTE_VERSION=$(get_remote_script_version "$SH_SCRIPT_URL")
+#SH_REMOTE_VERSION=$(get_remote_script_version "$SH_SCRIPT_URL")
 
 MS_REMOTE_VERSION=$(get_remote_script_version "$MS_LIB_URL")
 UDP_REMOTE_VERSION=$(get_remote_script_version "$UDP_LIB_URL")
@@ -132,7 +132,7 @@ MAGIC_REMOTE_VERSION=$(get_remote_script_version "$MAGIC_LIB_URL")
 
 log "Remote WebApp-Version: $WEBAPP_REMOTE_VERSION"
 log "Remote Python-Skript-Version: $PY_REMOTE_VERSION"
-log "Remote Shell-Skript-Version: $SH_REMOTE_VERSION"
+#log "Remote Shell-Skript-Version: $SH_REMOTE_VERSION"
 
 log "Remote Python-MessageStore-Version: $MS_REMOTE_VERSION"
 log "Remote Python-UDP-Version: $UDP_REMOTE_VERSION"
@@ -195,11 +195,11 @@ if version_gt "$MAGIC_REMOTE_VERSION" "$MAGIC_LOCAL_VERSION"; then
 fi
 
 # --- Shell-Skript Update ---
-if version_gt "$SH_REMOTE_VERSION" "$SH_LOCAL_VERSION"; then
-  log "Aktualisiere Shell-Skript von $SH_LOCAL_VERSION auf $SH_REMOTE_VERSION"
-  curl -fsSL "$SH_SCRIPT_URL" -o "$SH_FILE"
-  chmod +x "$SH_FILE"
-fi
+#if version_gt "$SH_REMOTE_VERSION" "$SH_LOCAL_VERSION"; then
+#  log "Aktualisiere Shell-Skript von $SH_LOCAL_VERSION auf $SH_REMOTE_VERSION"
+#  curl -fsSL "$SH_SCRIPT_URL" -o "$SH_FILE"
+#  chmod +x "$SH_FILE"
+#fi
 
 # --- Webserver neu starten ---
 log "Reloade Webserver ..."
@@ -230,12 +230,13 @@ else
   warn "Version nicht verifiziert oder Seite nicht erreichbar ($VERSION_CHECK)"
 fi
 
+      #--arg sh "$SH_REMOTE_VERSION" \
 # --- State speichern ---
 jq -n --arg wa "$WEBAPP_REMOTE_VERSION" \
       --arg py "$PY_REMOTE_VERSION" \
-      --arg sh "$SH_REMOTE_VERSION" \
       --arg inst "$SCRIPT_VERSION" \
-      '{webapp: $wa, python: $py, shell: $sh, installer: $inst}' > "$STATE_FILE"
+      '{webapp: $wa, python: $py, installer: $inst}' > "$STATE_FILE"
+      #'{webapp: $wa, python: $py, shell: $sh, installer: $inst}' > "$STATE_FILE"
 
 log "Installations-Skript erfolgreich abgeschlossen."
 

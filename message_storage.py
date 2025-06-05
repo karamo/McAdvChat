@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from statistics import mean
 import sys
 
-VERSION="v0.37.0"
+VERSION="v0.38.0"
 
 has_console = sys.stdout.isatty()
 
