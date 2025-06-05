@@ -14,7 +14,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.37.0"
+VERSION="v0.38.0"
 
 has_console = sys.stdout.isatty()
 
