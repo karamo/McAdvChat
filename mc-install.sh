@@ -35,6 +35,9 @@ WS_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/websocket_han
 BLE_LIB="/usr/local/bin/ble_handler.py"
 BLE_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/ble_handler.py"
 
+MAGIC_LIB="/usr/local/bin/magicword.py"
+MAGIC_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/magicword.py"
+
 
 # --- Sudo-Handling ---
 if [[ $EUID -ne 0 ]]; then
@@ -108,11 +111,13 @@ MS_LOCAL_VERSION=$(get_local_version_file "$MS_LIB")
 UDP_LOCAL_VERSION=$(get_local_version_file "$UDP_LIB")
 WS_LOCAL_VERSION=$(get_local_version_file "$WS_LIB")
 BLE_LOCAL_VERSION=$(get_local_version_file "$BLE_LIB")
+MAGIC_LOCAL_VERSION=$(get_local_version_file "$MAGIC_LIB")
 
 log "Lokale Python-MessageStore-Version: $MS_LOCAL_VERSION"
 log "Lokale Python-UDP-Version: $UDP_LOCAL_VERSION"
 log "Lokale Python-WebSocket-Version: $WS_LOCAL_VERSION"
 log "Lokale Python-Bluetooth-Version: $BLE_LOCAL_VERSION"
+log "Lokale Python-MagicWord-Version: $MAGIC_LOCAL_VERSION"
 
 # --- Remote Versionen ---
 WEBAPP_REMOTE_VERSION=$(get_latest_webapp_version)
@@ -123,6 +128,7 @@ MS_REMOTE_VERSION=$(get_remote_script_version "$MS_LIB_URL")
 UDP_REMOTE_VERSION=$(get_remote_script_version "$UDP_LIB_URL")
 WS_REMOTE_VERSION=$(get_remote_script_version "$WS_LIB_URL")
 BLE_REMOTE_VERSION=$(get_remote_script_version "$BLE_LIB_URL")
+MAGIC_REMOTE_VERSION=$(get_remote_script_version "$MAGIC_LIB_URL")
 
 log "Remote WebApp-Version: $WEBAPP_REMOTE_VERSION"
 log "Remote Python-Skript-Version: $PY_REMOTE_VERSION"
@@ -132,6 +138,7 @@ log "Remote Python-MessageStore-Version: $MS_REMOTE_VERSION"
 log "Remote Python-UDP-Version: $UDP_REMOTE_VERSION"
 log "Remote Python-WebSocket-Version: $WS_REMOTE_VERSION"
 log "Remote Python-Bluetooth-Version: $BLE_REMOTE_VERSION"
+log "Remote Python-MagicWord-Version: $MAGIC_REMOTE_VERSION"
 
 # --- WebApp Update ---
 if version_gt "$WEBAPP_REMOTE_VERSION" "$WEBAPP_LOCAL_VERSION"; then
@@ -178,6 +185,13 @@ if version_gt "$BLE_REMOTE_VERSION" "$BLE_LOCAL_VERSION"; then
   log "Aktualisiere Python-Bluetooth-Lib von $BLE_LOCAL_VERSION auf $BLE_REMOTE_VERSION"
   curl -fsSL "$BLE_LIB_URL" -o "$BLE_LIB"
   chmod +x "$BLE_LIB"
+fi
+
+# --- Python-WebSocket-Lib Update ---
+if version_gt "$MAGIC_REMOTE_VERSION" "$MAGIC_LOCAL_VERSION"; then
+  log "Aktualisiere Python-MagicWord-Lib von $MAGIC_LOCAL_VERSION auf $MAGIC_REMOTE_VERSION"
+  curl -fsSL "$MAGIC_LIB_URL" -o "$MAGIC_LIB"
+  chmod +x "$MAGIC_LIB"
 fi
 
 # --- Shell-Skript Update ---

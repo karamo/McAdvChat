@@ -7,6 +7,8 @@ CONFIG_PATH = "/etc/mcadvchat/config.json"
 MIN_LENGTH = 8
 SALT_LENGTH = 16  # results in 32 hex chars
 
+VERSION="v0.37.0"
+
 def load_config(path):
     with open(path, "r") as f:
         return json.load(f)
