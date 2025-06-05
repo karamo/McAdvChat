@@ -20,10 +20,15 @@ latest_tag=$(curl -s https://api.github.com/repos/DK5EN/McAdvChat/releases/lates
 
 RELEASE_URL="https://github.com/DK5EN/McAdvChat/releases/download/${latest_tag}/dist.tar.gz"
 PY_SCRIPT_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/C2-mc-ws.py"
-#SH_SCRIPT_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-screen.sh"
 PY_FILE="/usr/local/bin/C2-mc-ws.py"
+
+#SH_SCRIPT_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-screen.sh"
 #SH_FILE="/usr/local/bin/mc-screen.sh"
-SCRIPT_VERSION="v0.3.0"
+
+SV_SCRIPT_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/supervisor.py"
+SV_FILE="/usr/local/bin/supervisor.py"
+
+SCRIPT_VERSION="v0.4.0"
 
 MS_LIB="/usr/local/bin/message_storage.py"
 MS_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/message_storage.py"
@@ -34,6 +39,9 @@ WS_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/websocket_han
 
 BLE_LIB="/usr/local/bin/ble_handler.py"
 BLE_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/ble_handler.py"
+
+COMMAND_LIB="/usr/local/bin/command_handler.py"
+COMMAND_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/command_handler.py"
 
 MAGIC_LIB="/usr/local/bin/magicword.py"
 MAGIC_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/magicword.py"
@@ -100,44 +108,59 @@ version_gt() {
 WEBAPP_LOCAL_VERSION=$(get_local_webapp_version)
 PY_LOCAL_VERSION=$(get_local_version_file "$PY_FILE")
 #SH_LOCAL_VERSION=$(get_local_version_file "$SH_FILE")
+SV_LOCAL_VERSION=$(get_local_version_file "$SV_FILE")
 SCRIPT_LOCAL_VERSION=$(get_local_version_file "$0")
 
-log "Lokale WebApp-Version: $WEBAPP_LOCAL_VERSION"
-log "Lokale Python-Skript-Version: $PY_LOCAL_VERSION"
-#log "Lokale Shell-Skript-Version: $SH_LOCAL_VERSION"
 log "Install-Skript-Version: $SCRIPT_VERSION"
 
+
 MS_LOCAL_VERSION=$(get_local_version_file "$MS_LIB")
-UDP_LOCAL_VERSION=$(get_local_version_file "$UDP_LIB")
 WS_LOCAL_VERSION=$(get_local_version_file "$WS_LIB")
 BLE_LOCAL_VERSION=$(get_local_version_file "$BLE_LIB")
+UDP_LOCAL_VERSION=$(get_local_version_file "$UDP_LIB")
+COMMAND_LOCAL_VERSION=$(get_local_version_file "$COMMAND_LIB")
 MAGIC_LOCAL_VERSION=$(get_local_version_file "$MAGIC_LIB")
 
-log "Lokale Python-MessageStore-Version: $MS_LOCAL_VERSION"
-log "Lokale Python-UDP-Version: $UDP_LOCAL_VERSION"
-log "Lokale Python-WebSocket-Version: $WS_LOCAL_VERSION"
-log "Lokale Python-Bluetooth-Version: $BLE_LOCAL_VERSION"
-log "Lokale Python-MagicWord-Version: $MAGIC_LOCAL_VERSION"
 
 # --- Remote Versionen ---
+log "Lokale WebApp-Version: $WEBAPP_LOCAL_VERSION"
 WEBAPP_REMOTE_VERSION=$(get_latest_webapp_version)
-PY_REMOTE_VERSION=$(get_remote_script_version "$PY_SCRIPT_URL")
-#SH_REMOTE_VERSION=$(get_remote_script_version "$SH_SCRIPT_URL")
-
-MS_REMOTE_VERSION=$(get_remote_script_version "$MS_LIB_URL")
-UDP_REMOTE_VERSION=$(get_remote_script_version "$UDP_LIB_URL")
-WS_REMOTE_VERSION=$(get_remote_script_version "$WS_LIB_URL")
-BLE_REMOTE_VERSION=$(get_remote_script_version "$BLE_LIB_URL")
-MAGIC_REMOTE_VERSION=$(get_remote_script_version "$MAGIC_LIB_URL")
-
 log "Remote WebApp-Version: $WEBAPP_REMOTE_VERSION"
+
+log "Lokale Python-Skript-Version: $PY_LOCAL_VERSION"
+PY_REMOTE_VERSION=$(get_remote_script_version "$PY_SCRIPT_URL")
 log "Remote Python-Skript-Version: $PY_REMOTE_VERSION"
+
+#log "Lokale Shell-Skript-Version: $SH_LOCAL_VERSION"
+#SH_REMOTE_VERSION=$(get_remote_script_version "$SH_SCRIPT_URL")
 #log "Remote Shell-Skript-Version: $SH_REMOTE_VERSION"
 
+log "Lokale Super Visor Skript Version: $SV_LOCAL_VERSION"
+SV_REMOTE_VERSION=$(get_remote_script_version "$SV_SCRIPT_URL")
+log "Remote Super Visor Skript Version: $SV_REMOTE_VERSION"
+
+log "Lokale Python-MessageStore-Version: $MS_LOCAL_VERSION"
+MS_REMOTE_VERSION=$(get_remote_script_version "$MS_LIB_URL")
 log "Remote Python-MessageStore-Version: $MS_REMOTE_VERSION"
+
+log "Lokale Python-UDP-Version: $UDP_LOCAL_VERSION"
+UDP_REMOTE_VERSION=$(get_remote_script_version "$UDP_LIB_URL")
 log "Remote Python-UDP-Version: $UDP_REMOTE_VERSION"
+
+log "Lokale Python-WebSocket-Version: $WS_LOCAL_VERSION"
+WS_REMOTE_VERSION=$(get_remote_script_version "$WS_LIB_URL")
 log "Remote Python-WebSocket-Version: $WS_REMOTE_VERSION"
+
+log "Lokale Python-Bluetooth-Version: $BLE_LOCAL_VERSION"
+BLE_REMOTE_VERSION=$(get_remote_script_version "$BLE_LIB_URL")
 log "Remote Python-Bluetooth-Version: $BLE_REMOTE_VERSION"
+
+log "Lokale Command-Handler Version: $COMMAND_LOCAL_VERSION"
+COMMAND_REMOTE_VERSION=$(get_remote_script_version "$COMMAND_LIB_URL")
+log "Remote Command-Handler Version: $COMMAND_REMOTE_VERSION"
+
+log "Lokale Python-MagicWord-Version: $MAGIC_LOCAL_VERSION"
+MAGIC_REMOTE_VERSION=$(get_remote_script_version "$MAGIC_LIB_URL")
 log "Remote Python-MagicWord-Version: $MAGIC_REMOTE_VERSION"
 
 # --- WebApp Update ---
@@ -150,7 +173,20 @@ if version_gt "$WEBAPP_REMOTE_VERSION" "$WEBAPP_LOCAL_VERSION"; then
   curl -fsSL "$RELEASE_URL" | tar -xz --strip-components=1 -C "$INSTALL_DIR"
   chown -R "$REAL_USER":www-data "$INSTALL_DIR"
   chmod -R 775 "$INSTALL_DIR"
+
+  # --- Webserver neu starten ---
+  log "Reloade Webserver ..."
+  systemctl restart lighttpd || warn "Neustart fehlgeschlagen, versuche Reload"
+  #sleep 2 #give some time to start
+
 fi
+
+count=$(ls -1d $INSTALL_DIR-* 2>/dev/null | wc -l)
+if [ "$count" -gt 2 ]; then
+    ls -1dt $INSTALL_DIR-* | tail -n +3 | xargs rm -rf
+    echo "Cleaned up $((count - 2)) old webapp installations"
+fi
+
 
 # --- Python-Skript Update ---
 if version_gt "$PY_REMOTE_VERSION" "$PY_LOCAL_VERSION"; then
@@ -180,14 +216,21 @@ if version_gt "$WS_REMOTE_VERSION" "$WS_LOCAL_VERSION"; then
   chmod +x "$WS_LIB"
 fi
 
-# --- Python-WebSocket-Lib Update ---
+# --- Python-BLE-Lib Update ---
 if version_gt "$BLE_REMOTE_VERSION" "$BLE_LOCAL_VERSION"; then
   log "Aktualisiere Python-Bluetooth-Lib von $BLE_LOCAL_VERSION auf $BLE_REMOTE_VERSION"
   curl -fsSL "$BLE_LIB_URL" -o "$BLE_LIB"
   chmod +x "$BLE_LIB"
 fi
 
-# --- Python-WebSocket-Lib Update ---
+# --- Python-Command-Handler-Lib Update ---
+if version_gt "$COMMAND_REMOTE_VERSION" "$COMMAND_LOCAL_VERSION"; then
+  log "Aktualisiere Python-Command-Lib von $COMMAND_LOCAL_VERSION auf $COMMAND_REMOTE_VERSION"
+  curl -fsSL "$COMMAND_LIB_URL" -o "$COMMAND_LIB"
+  chmod +x "$COMMAND_LIB"
+fi
+
+# --- Python-Magic-Word-Lib Update ---
 if version_gt "$MAGIC_REMOTE_VERSION" "$MAGIC_LOCAL_VERSION"; then
   log "Aktualisiere Python-MagicWord-Lib von $MAGIC_LOCAL_VERSION auf $MAGIC_REMOTE_VERSION"
   curl -fsSL "$MAGIC_LIB_URL" -o "$MAGIC_LIB"
@@ -201,10 +244,13 @@ fi
 #  chmod +x "$SH_FILE"
 #fi
 
-# --- Webserver neu starten ---
-log "Reloade Webserver ..."
-systemctl restart lighttpd || warn "Neustart fehlgeschlagen, versuche Reload"
-sleep 2 #give some time to start
+# --- Super-Visor-Skript Update ---
+if version_gt "$SV_REMOTE_VERSION" "$SV_LOCAL_VERSION"; then
+  log "Aktualisiere Super Visor Skript von $SV_LOCAL_VERSION auf $SV_REMOTE_VERSION"
+  curl -fsSL "$SV_SCRIPT_URL" -o "$SV_FILE"
+  chmod +x "$SV_FILE"
+fi
+
 
 # --- Funktionstest ---
 HOSTNAME=$(hostname -s)

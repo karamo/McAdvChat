@@ -10,6 +10,8 @@ from pathlib import Path
 import websockets
 from websockets.server import WebSocketServerProtocol
 
+VERSION="v0.38.0"
+
 CONFIG_PATH = "/etc/mcadvchat/config.json"
 PROXY_SCRIPT = "/usr/local/bin/C2-mc-ws.py"
 VENV_PYTHON = "/home/martin/venv/bin/python"
