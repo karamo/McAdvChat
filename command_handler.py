@@ -5,7 +5,7 @@ import time
 import sys
 from collections import defaultdict, deque
 
-VERSION = "v0.38.0"
+VERSION="v0.38.0"
 
 has_console = sys.stdout.isatty()
 
