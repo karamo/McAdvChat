@@ -151,5 +151,5 @@ sudo systemctl enable mcproxy.service
 sudo systemctl restart mcproxy.service
 
 echo "✅Service 'mcproxy' successfully installed and started."
-echo "now go to your webbrowser, import the root certificate"
-echo "then go to settings page"
+echo "if not already done, go to your webbrowser, import the root certificate"
+echo "then check the settings page"
