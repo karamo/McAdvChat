@@ -81,9 +81,10 @@ if [ ! -f "$CONFIG_DIR/$CONFIG_FILE" ]; then
   "WS_HOST": "127.0.0.1",
   "WS_PORT": 2980,
   "PRUNE_HOURS": 168,
-  "MAX_STORAGE_SIZE_MB": 10,
+  "MAX_STORAGE_SIZE_MB": 20,
   "STORE_FILE_NAME": "$HOME_DIR/mcdump.json",
-  "VERSION": "v0.0.0"
+  "VERSION": "v0.0.0",
+  "CALL_SIGN": "DK0XXX"
 }
 EOF
   echo "now:    sudo vi $CONFIG_DIR/$CONFIG_FILE"
@@ -99,6 +100,21 @@ if jq -e --arg tgt "$REQUIRED_TARGET" '.UDP_TARGET == $tgt' "$CONFIG_DIR/$CONFIG
   echo "📝 edit your config parameter and come back .."
   echo "curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash"
   exit 1
+fi
+
+#update store size and add callsign
+# Stage 1: Storage size check
+if [[ $(jq -r '.MAX_STORAGE_SIZE_MB' /etc/mcadvchat/config.json) -lt 20 ]]; then
+  echo "Checking and updating message store size to min 25MB"
+  sudo jq '.MAX_STORAGE_SIZE_MB = 20' /etc/mcadvchat/config.json > /tmp/config.tmp && \
+  sudo  mv /tmp/config.tmp /etc/mcadvchat/config.json
+fi
+
+# Stage 2: Call sign check
+if ! jq -e '.CALL_SIGN' /etc/mcadvchat/config.json > /dev/null 2>&1; then
+  echo "Adding a config parameter for your Callsign, to enable remote commands"
+  sudo jq '.CALL_SIGN = "DK0XXX"' /etc/mcadvchat/config.json > /tmp/config.tmp && \
+  sudo mv /tmp/config.tmp /etc/mcadvchat/config.json
 fi
 
 # 4. Check and create systemd service
