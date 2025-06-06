@@ -79,8 +79,12 @@ get_local_version_file() {
   [[ -f "$1" ]] && grep -oE 'VERSION="v[0-9]+\.[0-9]+\.[0-9]+"' "$1" | cut -d'"' -f2 || echo "v0.0.0"
 }
 
+#get_local_webapp_version() {
+#  [[ -f "$INSTALL_DIR/version.txt" ]] && cat "$INSTALL_DIR/version.txt" || echo "v0.0.0"
+#}
+
 get_local_webapp_version() {
-  [[ -f "$INSTALL_DIR/version.txt" ]] && cat "$INSTALL_DIR/version.txt" || echo "v0.0.0"
+  [[ -f "$INSTALL_DIR/version.html" ]] && cat "$INSTALL_DIR/version.html" || echo "v0.0.0"
 }
 
 get_remote_script_version() {
@@ -179,6 +183,23 @@ if version_gt "$WEBAPP_REMOTE_VERSION" "$WEBAPP_LOCAL_VERSION"; then
   systemctl restart lighttpd || warn "Neustart fehlgeschlagen, versuche Reload"
   #sleep 2 #give some time to start
 
+  TIMEOUT=15
+  COUNTER=0
+  PID_FILE="/var/run/lighttpd.pid"
+
+  while [ $COUNTER -lt $TIMEOUT ]; do
+    if [ -f "$PID_FILE" ]; then
+      log "Webserver gestartet (PID: $(cat $PID_FILE))"
+      break
+    fi
+    sleep 1
+    COUNTER=$((COUNTER + 1))
+  done
+
+if [ $COUNTER -eq $TIMEOUT ]; then
+  warn "Timeout: PID-Datei nicht gefunden nach ${TIMEOUT}s"
+fi
+
 fi
 
 count=$(ls -1d $INSTALL_DIR-* 2>/dev/null | wc -l)
@@ -266,7 +287,7 @@ if [[ -z "$DOMAIN" ]]; then
 
 fi
 
-CHECK_URL="https://$HOSTNAME.$DOMAIN/webapp/version.txt"
+CHECK_URL="https://$HOSTNAME.$DOMAIN/webapp/version.html"
 
 log "Prüfe WebApp unter $CHECK_URL"
 VERSION_CHECK=$(curl -fsSL "$CHECK_URL" || echo "unreachable")
