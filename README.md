@@ -1,40 +1,17 @@
-# McApp initial release with draft install guide server components and webapp directory
+# McApp with install guide server components and webapp directory
 McApp is a single page, client rendered, web application. It should run on every modern browser out there, but you never know. Settings get stored in your browser. If you delete your browser cache, everything is reset.
 
-Rendering  on the client, the Raspberry Pi is only sending and receiving UDP LoRa and TCP web traffic.
+Rendering on the client, the Raspberry Pi is only sending and receiving UDP, Bluetooth LoRa and TCP web traffic.
 - No LightSQL - we have an SD Card that does not handle well constant writes
 - no PHP as this means, we need page reloads which is slow and not so elegant in 2025, just static web page is retrieved once
 - On initial page load, a dump from the UDP proxy gets sent to your browser. So every time you refresh your browser, you get a fresh reload.
-
-# McAdvChat - CI/CD Pipeline – Lightweight GitHub-Driven Deployment
-
-`McAdvChat` ist eine schlanke, browserbasierte Chat-App für Embedded Devices (z. B. Raspberry Pi), mit robustem Nachrichtenversand via LoRa, basierend auf APRS oder mit www Integration. Die WebApp wird automatisch gebaut, versioniert, als GitHub Release veröffentlicht – und kann remote auf Zielsystemen installiert werden, ganz ohne CI-Tools.
-
----
-
-## 🚀 Release & Deployment Workflow
-
-Dieses Projekt verwendet ein minimalistisches, aber robustes Shell-basiertes Deployment-System:
-
-After you have created a fresh SD Card:
-    curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_caddy.sh | bash
-Prepares the system for what is then installed
-
-Then you need to install the latest webpage and skritps.
-Every time the App shows a new version, you need to execute this:
-   curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-install.sh | sudo bash
-
-After you have everything on your machine, we need to make sure, that the proxy is updated:
-   curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash
-
-You will find your configuration on:
-  sudo vi /etc/mcwebapp/config.json
+- Try to install the app on your mobile phone by storing it as icon on your home screen
 
 .. please refer to the install guide, as it has screenshots available
 
 ### 🧱 `release.sh` – Build & Publis (hidden, not public)
 
-You can install this app and as of May 2025, I am constantly updating it, to refelect latest issues and development of MeshCom
+You can install this app, I am constantly updating it, to refelect latest issues and development of MeshCom
 
 How I package my application with the release script:
 - is building the WebApp (`npm run build`)
@@ -48,7 +25,6 @@ How I package my application with the release script:
 
 There are scripts, that are stored on GitHub, so they are ever green to be executed on the target machine (e.g. Raspberry Pi Zero 2W):
 
-
    curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/mc-install.sh | sudo bash
    curl -fsSL https://raw.githubusercontent.com/DK5EN/McAdvChat/main/install_mcproxy.sh | bash
 
@@ -56,14 +32,13 @@ There are scripts, that are stored on GitHub, so they are ever green to be execu
 
 # McApp Pflichtenheft 
 
-Mein persönliches MashCom McApp-Projekt zerfällt in zwei Komponenten: 
+Das MashCom McApp-Projekt zerfällt in zwei Komponenten: 
 - Frontend, das hübsch, responsive und Mulit-Device fähig ist
     - Soll sich wie eine App benehmen
     - Soll sich an aktuellen Programmierstandards für Webanwendungen orientieren
     - Soll als Progressive Web App (PWA) im Browser installierbar sein
     - Soll als PWA am Telefon Bildschirm abgelegt werden können
     - Soll sowohl am Laptop, wie am iPad als auch am Telefon laufen
-    	- Mobile Phone Support derzeit noch eingeschränkt, da hierfür noch das Layout optimiert werden muss
     - Muss Dark Mode fähig sein
     - Muss sich an den Bildschirm dynamisch anpassen aka responsive design
     - Muss regelmäßig mit security fixes versorgt werden, da in den Bibliotheken vulnerabilities sein können
@@ -113,10 +88,13 @@ Mein persönliches MashCom McApp-Projekt zerfällt in zwei Komponenten:
 - Das Server Backend 
     - Läuft auf einem Raspi Pi Zero 2W, weil der besonders stromsparend ist und mehr als ausreichend ist für unsere Zwecke
     - Erhält über UDP alle Nachrichten vom MeshCom node (--extupip 192... und --extudp on nicht vergessen!)
+    - Spricht ebenso das Bluetoth Protokoll, für eine stabilere Übertragung mit mehr Daten und mehr Möglichkeiten
+    - Implementiert ein Keep-Alive über Bluetooth und verbindet sich automatisch neu, falls die Verbindung verloren geht
+    - Setzt die Zeitzone automatisch auf dem MeshCom Node, berücksichtigt Sommer/Winterzeit
     - Muss UTF-8 und APRS Protokoll Checks durchführen, weil es immer wieder illegale Zeichen gibt, die dann zu Abstürzen führen
     - Greift über BLE auf das Device zu, wenn gar nichts mehr geht
-    	- Wird nicht über http auf das MeshCom Device zugreifen, weil BLE implementiert ist
     - Kann Skripts und Webseite über bootstrap skript automatisch aktualisieren
+    - mheard RSSI und SNR Statistiken erzeugen, wenn BLE verbunden ist
       
 - Use Cases:
     - Chat
@@ -133,17 +111,9 @@ Mein persönliches MashCom McApp-Projekt zerfällt in zwei Komponenten:
         - man kann auf mehreren Nodes den Raspi als Ziel angeben. Somit ist sichergestellt, dass wenn ein Node etwas überhört, wir die Nachricht vom anderen Node bekommen. 2 sind gut, 3 sind natürlich besser. Am Besten "Antennen Diversity" machen, also die Nodes über den Raum verteilen.
 
 Was noch fehlt:
-- Der UDP Proxy spricht schon BLE aber die WebApp muss hier noch dazulernen
-- mheard RSSI und SNR auslesen und Statistiken erzeugen, kann mit BLE Support kommen
-- APRS Icon auf für den Chat verwenden (gimmick, wird nie richtig laufen ohne Internet Verbindung, da die Info nicht vorliegt)
 - Auslesen von Umweltsensoren, inklusive Dashboard zur Anzeige der Statistiken
     - Aktuell noch keinen echten UseCase dafür, da man die Umweltsensoren für die Implementierung benötigt
     - Bräuche dazu erst mal LoRa Pakete, wo diese Infos drin stecken
-- Projekt sollte sich auf einer neuen SD-Karte selbst Bootstrappen mit einem Shellscript
-    - Nutzer-Probleme mit den SSL-Zertifikaten sind zu erwarten, kann ein Show-Stopper sein, weil ohne DNS-Auflösung (oder mDNS), wird das nix
-    - Scripten sind vorhanden und beschrieben
-- mc-screen.sh wrapper skript wurde bereits durch service ersetzen, das sich über systemctl steuern lässt
-    - systemctrl restart mcproxy
 
 
 # Vision: McAdvChat - der "MeshCom Advanced Chat"
@@ -194,6 +164,7 @@ Was noch fehlt:
 - Auf einen Nachrichtendigest (MD5) wird zur Verifikation wird verzeichtet, denn dies stell der MeshCom Node schon bereit. Und Reed-Solomon inkludiert dies schon
 - Optionale, selektive Retransmission einzelner Fragmente erhöht die Robustheit bei Paketverlust.
    - würde voraussetzen, dass Pakete bestätigt werden
+
 
 ### Technische Details zu den Überlegungen vorab, die sich aber nicht erfüllen:
 	• Kanalmodell: öffentlich geteiltes Medium, definitiv mit Hidden-Node-Problem weil alles bis zu 4 Hops wiederholt wird, hohe Paketfehlerwahrscheinlichkeit bei steigender Payloadgröße
@@ -256,7 +227,7 @@ Lessons learned
 
 ## 4) MeshCom
 
-Es ist wichtig hier zu betonen, dass wir auf das bestehde MeshCom Protokoll aufsetzen, das wiederum LoRa mit APRS Protokoll als Unterbau hat. LoRaWan selbst bringt Fehlerkorrektur mit sich, sodass Kommunikation mit den aktuellen Kanal Parametern bis ca. SNR -17dB stattfinden kann. Es kommt trotzdem immer wieder zu Übertragungen die verloregn, da die Übertragung nicht sichergestellt ist und wie oben dargestellt potentiell längere Nachrichten eine höhere Fehleranfälligkeit mit vollständigem Verlust haben. Man sieht auch, dass manche LoRa Frames erneut übertragen werden, hierzu ist dem Autor nichts näher dazu bekannt.
+Es ist wichtig zu betonen, dass wir auf das bestehde MeshCom Protokoll aufsetzen, das wiederum LoRa mit APRS Protokoll als Unterbau hat. Kommunikation mit den aktuellen Kanal Parametern ist bis ca. SNR -17dB möglich. Es kommt trotzdem immer wieder zu Übertragungen die verloregn, da die Übertragung nicht sichergestellt ist und wie oben dargestellt potentiell längere Nachrichten eine höhere Fehleranfälligkeit mit vollständigem Verlust haben. Man sieht auch, dass manche LoRa Frames erneut übertragen werden, hierzu ist dem Autor nichts näher dazu bekannt.
 
 ## 5) Verdict, Diskussion und offene Punkte
 
@@ -266,7 +237,7 @@ Stärken
 	• Praktische, realitätsnahe Annahmen (Fehlerraten, Broadcastmodell)
  	• Wissenschaftlich hinterlegt, basierend auf bekannten Modellen und Vorgehensweisen, keine sudo Science.
 
-Schächen
+Schwächen
         • Die Rechnung leider ohne den Zugriff auf die rohen MeshCom LoRa Frames gemacht
 
 Was noch fehlt / was noch definiert werden muss um die Idee tiefer zu legen
