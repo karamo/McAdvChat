@@ -9,6 +9,8 @@ from ble_handler import (
     handle_a0_command, handle_set_command, handle_ble_message
 )
 
+from command_handler import create_command_handler
+
 import asyncio
 import errno
 import json
@@ -22,23 +24,11 @@ import websockets
 from struct import *
 
 import time
-#from datetime import datetime, timedelta, timezone
-#from zoneinfo import ZoneInfo
-#from timezonefinder import TimezoneFinder
 
 from collections import deque, defaultdict
-#from statistics import mean
-#from operator import itemgetter
 
-#from dbus_next import Variant, MessageType
-#from dbus_next.aio import MessageBus
-#from dbus_next.constants import BusType
-#from dbus_next.errors import DBusError, InterfaceNotFoundError
-#from dbus_next.service import ServiceInterface, method
+VERSION="v0.39.0"
 
-#from daily_sqlite_dumper import DailySQLiteDumper
-
-VERSION="v0.38.0"
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
    print("*** Debug 🐛 and 🔧 DEV Environment detected ***")
@@ -66,6 +56,7 @@ class MessageRouter:
         self._protocols = {}
         self.storage_handler = message_storage_handler
         self.logger = print
+        self.my_callsign = None
 
         if message_storage_handler:
             self.subscribe('mesh_message', self._storage_handler)
@@ -73,6 +64,10 @@ class MessageRouter:
 
         self.subscribe('ble_message', self._ble_message_handler)  
         self.subscribe('udp_message', self._udp_message_handler) 
+
+    def set_callsign(self, callsign):
+        """Set the callsign from config"""
+        self.my_callsign = callsign.upper()
 
     async def _udp_message_handler(self, routed_message):
         """Handle UDP messages from WebSocket and route to UDP handler"""
@@ -110,7 +105,6 @@ class MessageRouter:
 
     async def _ble_message_handler(self, routed_message):
         """Handle BLE messages from WebSocket and route to BLE client"""
-        #global client
         
         message_data = routed_message['data']
         msg = message_data.get('msg')
@@ -118,8 +112,17 @@ class MessageRouter:
         
         if has_console:
             print(f"📱 BLE Message Handler: Sending '{msg}' to '{dst}'")
-            
-        await handle_ble_message(msg, dst) 
+
+        if self._is_message_to_self(message_data):
+            if has_console:
+                print(f"🔄 MessageRouter: Detected self-message to {dst}, routing to CommandHandler only")
+            synthetic_message = self._create_synthetic_message(message_data)
+            await self._route_to_command_handler(synthetic_message)
+        else:
+            if has_console:
+                print(f"📡 MessageRouter: External message, routing to BLE handler")
+            await handle_ble_message(msg, dst)
+
 
     async def _storage_handler(self, routed_message):
         """Handle message storage for all routed messages"""
@@ -342,6 +345,57 @@ class MessageRouter:
     async def _handle_device_set_command(self, command):
         """Handle device set commands (--settime, --setCALL, etc.)"""
         await handle_set_command(command)
+
+    def _is_message_to_self(self, message_data):
+        """Check if message is addressed to our own callsign"""
+        if not self.my_callsign:
+            return False
+        dst = message_data.get('dst', '').upper()
+        msg = message_data.get('msg', '')
+
+        #return dst == self.my_callsign and msg.startswith('!')
+        return dst == self.my_callsign
+
+    def _create_synthetic_message(self, original_message):
+        """Create a synthetic message that looks like it came from LoRa"""
+        current_time = int(time.time())
+        msg_id = f"{current_time:08X}"  # Hex timestamp as msg_id
+    
+        return {
+            'src': self.my_callsign,  # Use configured callsign as source
+            'dst': original_message.get('dst').upper(),
+            'msg': original_message.get('msg'),
+            'msg_id': msg_id,
+            'type': 'msg',
+            'src_type': 'ble',  # Keep as 'ble' to avoid breaking application logic
+            'timestamp': current_time * 1000
+        }
+
+    async def _route_to_command_handler(self, synthetic_message):
+        """Route synthetic message to CommandHandler"""
+        if has_console:
+            print(f"🔄 MessageRouter: Creating synthetic message: {synthetic_message}")
+
+        routed_message = {
+            'source': 'self',
+            'type': 'ble_notification',
+            'data': synthetic_message,
+            'timestamp': int(time.time() * 1000)
+        }
+
+        if has_console:
+            print(f"🔄 MessageRouter: Routing to CommandHandler subscribers...")
+            print(f"🔄 MessageRouter: Available subscribers for 'ble_notification': {len(self._subscribers['ble_notification'])}")
+    
+        # Find CommandHandler subscribers
+        for handler in self._subscribers['ble_notification']:
+            #if 'CommandHandler' in str(type(handler)):
+            try:
+                  await handler(routed_message)
+                  if has_console:
+                      print(f"🔄 MessageRouter: Routed self-message to CommandHandler")
+            except Exception as e:
+                    print(f"MessageRouter ERROR: Failed to route self-message: {e}")
                 
 
 async def main():
@@ -352,6 +406,13 @@ async def main():
     storage_handler.prune_messages(PRUNE_HOURS, block_list)
 
     message_router = MessageRouter(storage_handler)
+
+    CALL_SIGN = config["CALL_SIGN"]
+    message_router.set_callsign(CALL_SIGN)
+
+    #Command Handler Plugin
+    command_handler = create_command_handler(message_router, storage_handler, CALL_SIGN)
+    message_router.register_protocol('commands', command_handler)
 
     udp_handler = UDPHandler(
         listen_port=UDP_PORT_list,
@@ -431,6 +492,7 @@ if __name__ == "__main__":
     has_console = sys.stdout.isatty()
     config = load_config()
 
+
     UDP_PORT_list = config["UDP_PORT_list"]
     UDP_PORT_send = config["UDP_PORT_send"]
 
@@ -453,5 +515,5 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Manuell beendet mit Ctrl+C")
+       print("Manuell beendet mit Ctrl+C")
 
