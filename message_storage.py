@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
+import asyncio
+import concurrent.futures
 import json
+import os
 import time
 from collections import deque, defaultdict
 from datetime import datetime, timedelta
+from functools import partial
 from statistics import mean
 import sys
 
@@ -60,10 +64,12 @@ def floor_to_bucket(unix_ms):
 class MessageStorageHandler:
     """Handles message storage and retrieval operations"""
     
-    def __init__(self, message_store=None, max_size_mb=50):
+    def __init__(self, message_store=None, max_size_mb=50, max_workers=None):
         self.message_store = message_store if message_store is not None else deque()
         self.message_store_size = 0
         self.max_size_mb = max_size_mb
+        # Use 3 cores, leave 1 for main thread
+        self.max_workers = max_workers or min(3, os.cpu_count() - 1)
         self._recalculate_size()
         
     def _recalculate_size(self):
@@ -175,7 +181,6 @@ class MessageStorageHandler:
 
     def load_dump(self, filename):
         """Load message store from file"""
-        import os
         if os.path.exists(filename):
             with open(filename, "r", encoding="utf-8") as f:
                 loaded = json.load(f)
@@ -233,8 +238,117 @@ class MessageStorageHandler:
                      if json.loads(item["raw"]).get("type") == "msg"]
         return [item["raw"] for item in msg_items]
 
+    def _process_message_chunk(self, messages_chunk, cutoff_timestamp_ms):
+        """Process a chunk of messages in a worker thread"""
+        chunk_buckets = defaultdict(lambda: {"rssi": [], "snr": []})
+        
+        for item in messages_chunk:
+            raw_str = item.get("raw")
+            if not raw_str:
+                continue
+                
+            try:
+                parsed = json.loads(raw_str)
+            except json.JSONDecodeError:
+                continue
+
+            src = safe_get(parsed, "src")
+            if not src:
+                continue
+
+            rssi = parsed.get("rssi")
+            snr = parsed.get("snr") 
+            timestamp_ms = parsed.get("timestamp")
+
+            if timestamp_ms is None or timestamp_ms < cutoff_timestamp_ms:
+                continue
+
+            if not (is_valid_value(rssi, *VALID_RSSI_RANGE) and 
+                   is_valid_value(snr, *VALID_SNR_RANGE)):
+                continue
+
+            bucket_time = floor_to_bucket(timestamp_ms)
+            callsigns = [s.strip() for s in src.split(",")]
+
+            for call in callsigns:
+                key = (bucket_time, call)
+                chunk_buckets[key]["rssi"].append(rssi)
+                chunk_buckets[key]["snr"].append(snr)
+                
+        return chunk_buckets
+
+    async def process_mheard_store_parallel(self):
+        """Parallelized version of process_mheard_store"""
+        now_ms = int(time.time() * 1000)
+        cutoff_timestamp_ms = now_ms - SEVEN_DAYS_MS
+
+        # Split message store into chunks for parallel processing
+        messages = list(self.message_store)
+        if not messages:
+            return []
+            
+        chunk_size = max(1, len(messages) // self.max_workers)
+        chunks = [messages[i:i + chunk_size] for i in range(0, len(messages), chunk_size)]
+
+        if has_console:
+            print(f"📊 Processing {len(messages)} messages in {len(chunks)} chunks using {self.max_workers} workers")
+
+        # Process chunks in parallel
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Create partial function with cutoff timestamp
+            process_func = partial(self._process_message_chunk, cutoff_timestamp_ms=cutoff_timestamp_ms)
+            
+            # Submit all chunks for parallel processing
+            future_to_chunk = {
+                loop.run_in_executor(executor, process_func, chunk): i 
+                for i, chunk in enumerate(chunks)
+            }
+            
+            # Collect results as they complete
+            all_buckets = defaultdict(lambda: {"rssi": [], "snr": []})
+            completed = 0
+            
+            for future in asyncio.as_completed(future_to_chunk):
+                chunk_buckets = await future
+                completed += 1
+                
+                if has_console:
+                    print(f"📊 Chunk {completed}/{len(chunks)} completed")
+                
+                # Merge chunk results into main buckets
+                for key, values in chunk_buckets.items():
+                    all_buckets[key]["rssi"].extend(values["rssi"])
+                    all_buckets[key]["snr"].extend(values["snr"])
+
+        # Calculate averages (this part is fast, keep sequential)
+        result = []
+        for (bucket_time, callsign), values in all_buckets.items():
+            rssi_values = values["rssi"]
+            snr_values = values["snr"]
+            count = min(len(rssi_values), len(snr_values))
+
+            if count == 0:
+                continue
+
+            avg_rssi = round(mean(rssi_values), 2)
+            avg_snr = round(mean(snr_values), 2)
+            result.append({
+                "src_type": "STATS",
+                "timestamp": bucket_time,
+                "callsign": callsign,
+                "rssi": avg_rssi,
+                "snr": avg_snr,
+                "count": count
+            })
+
+        if has_console:
+            print(f"📊 Parallel processing complete: {len(result)} statistics generated")
+        
+        return result
+
     def process_mheard_store(self):
-        """Process message store for MHeard statistics"""
+        """Process message store for MHeard statistics (original sequential version)"""
         now_ms = int(time.time() * 1000)
         cutoff_timestamp_ms = now_ms - SEVEN_DAYS_MS
 

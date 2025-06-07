@@ -282,15 +282,28 @@ class MessageRouter:
             await self.publish('router', 'websocket_direct', {'websocket': websocket, 'data': full})
             await asyncio.sleep(0)
 
+#    async def _handle_mheard_dump_command(self, websocket):
+#        """Handle mheard dump command"""
+#        mheard = self.storage_handler.process_mheard_store()
+#        payload = {
+#            "type": "response",
+#            "msg": "mheard stats", 
+#            "data": mheard
+#        }
+#        await self.publish('router', 'websocket_direct', {'websocket': websocket, 'data': payload})
+
     async def _handle_mheard_dump_command(self, websocket):
         """Handle mheard dump command"""
-        mheard = self.storage_handler.process_mheard_store()
+        # Use the parallel version
+        mheard = await self.storage_handler.process_mheard_store_parallel()
         payload = {
             "type": "response",
             "msg": "mheard stats", 
             "data": mheard
         }
         await self.publish('router', 'websocket_direct', {'websocket': websocket, 'data': payload})
+
+
 
     async def _handle_dump_to_fs_command(self):
         """Handle dump to filesystem command"""
