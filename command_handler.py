@@ -4,9 +4,10 @@ import hashlib
 import json
 import sys
 import time
+import re
 from collections import defaultdict, deque
 
-VERSION="v0.39.0"
+VERSION="v0.40.0"
 
 has_console = sys.stdout.isatty()
 
@@ -97,6 +98,12 @@ class CommandHandler:
     async def _message_handler(self, routed_message):
         """Handle incoming messages and check for commands"""
         message_data = routed_message['data']
+     
+        print("debug: _message_handler type", message_data.get('src_type'))
+#node
+#ble
+
+        src_type = message_data.get('src_type')
 
         # Filter for messages directed to us
         dst = message_data.get('dst')
@@ -104,6 +111,8 @@ class CommandHandler:
             return
             
         msg_text = message_data.get('msg', '')
+        msg_text = re.sub(r'\{\d{3}$', '', msg_text)
+
         src_raw = message_data.get('src', 'unknown')
         if src_raw == "unknown":
            return
@@ -122,7 +131,7 @@ class CommandHandler:
                 print(f"🔴 CommandHandler: User {src} is blocked due to abuse")
             if src not in self.block_notifications_sent:
                 self.block_notifications_sent.add(src)
-                await self.send_response("🚫 {src} temporarily in timeout due to repeated invalid commands", src)
+                await self.send_response("🚫 {src} temporarily in timeout due to repeated invalid commands", src, src_type)
                 if has_console:
                     print(f"🔴 CommandHandler: Sent block notification to {src}")
             else:
@@ -140,7 +149,7 @@ class CommandHandler:
         if self._is_throttled(content_hash):
             if has_console:
                 print(f"⏳ CommandHandler: THROTTLED - {src} command '{msg_text}' (hash: {content_hash})")
-            await self.send_response("⏳ Command throttled. Same command allowed once per 10min", src)
+            await self.send_response("⏳ Command throttled. Same command allowed once per 10min", src, src_type)
             return
 
             
@@ -151,7 +160,7 @@ class CommandHandler:
                 cmd, kwargs = cmd_result
                 response = await self.execute_command(cmd, kwargs, src)
 
-                await self.send_response(response, src)
+                await self.send_response(response, src, src_type)
 
                 self._mark_msg_id_processed(msg_id)
                 self._mark_content_processed(content_hash)
@@ -166,7 +175,7 @@ class CommandHandler:
                 # Also throttle malformed commands
                 self._mark_content_processed(content_hash)
 
-                await self.send_response("❌ Unknown command. Try !help", src)
+                await self.send_response("❌ Unknown command. Try !help", src, src_type)
                 
         except Exception as e:
             print(f"CommandHandler ERROR: {e}")
@@ -179,7 +188,7 @@ class CommandHandler:
 
             self._mark_content_processed(content_hash)
 
-            await self.send_response(f"❌ Command failed: {str(e)[:50]}", src)
+            await self.send_response(f"❌ Command failed: {str(e)[:50]}", src, src_type)
 
     def _get_content_hash(self, src, msg_text):
         """Create hash from source + full command (including arguments)"""
@@ -760,7 +769,7 @@ class CommandHandler:
         
         return response
 
-    async def send_response(self, response, recipient):
+    async def send_response(self, response, recipient, src_type='udp'):
         """Send response back to requester, chunking if necessary"""
         if not response:
             return
@@ -788,6 +797,7 @@ class CommandHandler:
                         'timestamp': int(time.time() * 1000)
                     }
                     await self.message_router.publish('command', 'websocket_message', websocket_message)
+
             else:
               # Send via message router
               if self.message_router:
@@ -799,7 +809,29 @@ class CommandHandler:
                   }
               
                   # Route to appropriate protocol (BLE or UDP)
-                  await self.message_router.publish('command', 'ble_message', message_data)
+                  #await self.message_router.publish('command', 'ble_message', message_data)
+
+                  print("entscheid ble oder udp",src_type)
+
+                  try:
+                        if src_type=="ble":
+                            await self.message_router.publish('command', 'ble_message', message_data)
+                            if has_console:
+                                print(f"📋 CommandHandler: Sent chunk {i+1} via BLE to {recipient}")
+                        elif src_type=="udp" or src_type=="node":
+                                # Update message data for UDP transport
+                                message_data['src_type'] = 'command_response_udp'
+                                await self.message_router.publish('command', 'udp_message', message_data)
+                                if has_console:
+                                    print(f"📋 CommandHandler: Sent chunk {i+1} via UDP to {recipient}")
+                        else:
+                            raise TransportUnavailableError("BLE and UDP not available")
+                  except Exception as ble_error:
+                        if has_console:
+                            print(f"⚠️  CommandHandler: send failed to {recipient}: {ble_error}")
+                        
+                            continue
+
                 
             # Small delay between chunks
             if i < len(chunks) - 1:
@@ -814,7 +846,6 @@ class CommandHandler:
             return [response]
             
         chunks = []
-        #lines = response.split('\n')
         lines = response.split(', ')
         current_chunk = ""
         
