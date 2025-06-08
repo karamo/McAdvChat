@@ -7,7 +7,7 @@ import time
 import re
 from collections import defaultdict, deque
 
-VERSION="v0.41.0"
+VERSION="v0.42.0"
 
 has_console = sys.stdout.isatty()
 
@@ -805,19 +805,21 @@ class CommandHandler:
                   }
               
                   # Route to appropriate protocol (BLE or UDP)
+                  print("command handler: src_type",src_type)
+
                   try:
                         if src_type=="ble":
                             await self.message_router.publish('command', 'ble_message', message_data)
                             if has_console:
                                 print(f"📋 CommandHandler: Sent chunk {i+1} via BLE to {recipient}")
-                        elif src_type=="udp" or src_type=="node":
+                        elif src_type in ["udp", "node", "lora"]:
                                 # Update message data for UDP transport
                                 message_data['src_type'] = 'command_response_udp'
                                 await self.message_router.publish('command', 'udp_message', message_data)
                                 if has_console:
                                     print(f"📋 CommandHandler: Sent chunk {i+1} via UDP to {recipient}")
                         else:
-                            raise TransportUnavailableError("BLE and UDP not available")
+                            print("TransportUnavailableError BLE and UDP not available",src_type)
                   except Exception as ble_error:
                         if has_console:
                             print(f"⚠️  CommandHandler: send failed to {recipient}: {ble_error}")
