@@ -10,7 +10,7 @@ from functools import partial
 from statistics import mean
 import sys
 
-VERSION="v0.39.0"
+VERSION="v0.41.0"
 
 has_console = sys.stdout.isatty()
 
@@ -206,6 +206,8 @@ class MessageStorageHandler:
             if '"type": "msg"' in raw:
                 try:
                     data = json.loads(raw)
+                    if ":ack" in raw:
+                       continue
                     dst = data.get("dst")
                     if (dst is not None and len(msgs_per_dst[dst]) < 50):
                         msgs_per_dst[dst].append(raw)

@@ -27,7 +27,7 @@ import time
 
 from collections import deque, defaultdict
 
-VERSION="v0.39.0"
+VERSION="v0.40.0"
 
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
@@ -282,16 +282,6 @@ class MessageRouter:
             await self.publish('router', 'websocket_direct', {'websocket': websocket, 'data': full})
             await asyncio.sleep(0)
 
-#    async def _handle_mheard_dump_command(self, websocket):
-#        """Handle mheard dump command"""
-#        mheard = self.storage_handler.process_mheard_store()
-#        payload = {
-#            "type": "response",
-#            "msg": "mheard stats", 
-#            "data": mheard
-#        }
-#        await self.publish('router', 'websocket_direct', {'websocket': websocket, 'data': payload})
-
     async def _handle_mheard_dump_command(self, websocket):
         """Handle mheard dump command"""
         # Use the parallel version
@@ -444,7 +434,7 @@ async def main():
     
     try:
           await websocket_manager.start_server()
-          ws_server = websocket_manager.server  # For shutdown compatibility
+          #ws_server = websocket_manager.server  # For shutdown compatibility
     except OSError as e:
       if e.errno == errno.EADDRINUSE:
            print(f"❌ Address {WS_HOST}:{WS_PORT} already in use.")
