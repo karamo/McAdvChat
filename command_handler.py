@@ -138,7 +138,7 @@ class CommandHandler:
         msg_id = message_data.get('msg_id')
         if self._is_duplicate_msg_id(msg_id):
             if has_console:
-                print(f"🔄 CommandHandler: Duplicate msg_id {msg_id}, ignoring silently")
+                print(f"🔄 CommandHandler: Duplicate msg_id {msg_id}, src_type {src_type}, ignoring silently")
             return
 
         content_hash = self._get_content_hash(src, msg_text)
