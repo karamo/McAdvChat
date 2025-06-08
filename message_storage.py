@@ -10,7 +10,7 @@ from functools import partial
 from statistics import mean
 import sys
 
-VERSION="v0.38.0"
+VERSION="v0.39.0"
 
 has_console = sys.stdout.isatty()
 
