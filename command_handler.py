@@ -156,10 +156,10 @@ class CommandHandler:
                 cmd, kwargs = cmd_result
                 response = await self.execute_command(cmd, kwargs, src)
 
-                await self.send_response(response, src, src_type)
-
                 self._mark_msg_id_processed(msg_id)
                 self._mark_content_processed(content_hash)
+
+                await self.send_response(response, src, src_type)
 
             else:
                 # Track failed attempt
@@ -805,10 +805,6 @@ class CommandHandler:
                   }
               
                   # Route to appropriate protocol (BLE or UDP)
-                  #await self.message_router.publish('command', 'ble_message', message_data)
-
-                  print("entscheid ble oder udp",src_type)
-
                   try:
                         if src_type=="ble":
                             await self.message_router.publish('command', 'ble_message', message_data)
@@ -825,7 +821,6 @@ class CommandHandler:
                   except Exception as ble_error:
                         if has_console:
                             print(f"⚠️  CommandHandler: send failed to {recipient}: {ble_error}")
-                        
                             continue
 
                 
