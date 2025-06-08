@@ -7,7 +7,7 @@ import time
 import re
 from collections import defaultdict, deque
 
-VERSION="v0.40.0"
+VERSION="v0.41.0"
 
 has_console = sys.stdout.isatty()
 
@@ -99,10 +99,6 @@ class CommandHandler:
         """Handle incoming messages and check for commands"""
         message_data = routed_message['data']
      
-        print("debug: _message_handler type", message_data.get('src_type'))
-#node
-#ble
-
         src_type = message_data.get('src_type')
 
         # Filter for messages directed to us
