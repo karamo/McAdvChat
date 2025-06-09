@@ -15,6 +15,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, Any, List
 import time
 
+VERSION="v0.40.0"
+
 # Logging Setup
 logging.basicConfig(
     level=logging.INFO,
