@@ -43,6 +43,9 @@ BLE_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/ble_handler.
 COMMAND_LIB="/usr/local/bin/command_handler.py"
 COMMAND_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/command_handler.py"
 
+METEO_LIB="/usr/local/bin/meteo.py"
+METEO_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/meteo.py"
+
 MAGIC_LIB="/usr/local/bin/magicword.py"
 MAGIC_LIB_URL="https://raw.githubusercontent.com/DK5EN/McAdvChat/main/magicword.py"
 
@@ -123,6 +126,7 @@ WS_LOCAL_VERSION=$(get_local_version_file "$WS_LIB")
 BLE_LOCAL_VERSION=$(get_local_version_file "$BLE_LIB")
 UDP_LOCAL_VERSION=$(get_local_version_file "$UDP_LIB")
 COMMAND_LOCAL_VERSION=$(get_local_version_file "$COMMAND_LIB")
+METEO_LOCAL_VERSION=$(get_local_version_file "$METEO_LIB")
 MAGIC_LOCAL_VERSION=$(get_local_version_file "$MAGIC_LIB")
 
 
@@ -162,6 +166,10 @@ log "Remote Python-Bluetooth-Version: $BLE_REMOTE_VERSION"
 log "Lokale Command-Handler Version: $COMMAND_LOCAL_VERSION"
 COMMAND_REMOTE_VERSION=$(get_remote_script_version "$COMMAND_LIB_URL")
 log "Remote Command-Handler Version: $COMMAND_REMOTE_VERSION"
+
+log "Lokale Meteo-Handler Version: $METEO_LOCAL_VERSION"
+METEO_REMOTE_VERSION=$(get_remote_script_version "$METEO_LIB_URL")
+log "Remote Meteo-Handler Version: $METEO_REMOTE_VERSION"
 
 log "Lokale Python-MagicWord-Version: $MAGIC_LOCAL_VERSION"
 MAGIC_REMOTE_VERSION=$(get_remote_script_version "$MAGIC_LIB_URL")
@@ -249,6 +257,13 @@ if version_gt "$COMMAND_REMOTE_VERSION" "$COMMAND_LOCAL_VERSION"; then
   log "Aktualisiere Python-Command-Lib von $COMMAND_LOCAL_VERSION auf $COMMAND_REMOTE_VERSION"
   curl -fsSL "$COMMAND_LIB_URL" -o "$COMMAND_LIB"
   chmod +x "$COMMAND_LIB"
+fi
+
+# --- Python-Meteo-Handler-Lib Update ---
+if version_gt "$METEO_REMOTE_VERSION" "$METEO_LOCAL_VERSION"; then
+  log "Aktualisiere Python-Meteo-Lib von $METEO_LOCAL_VERSION auf $METEO_REMOTE_VERSION"
+  curl -fsSL "$METEO_LIB_URL" -o "$METEO_LIB"
+  chmod +x "$METEO_LIB"
 fi
 
 # --- Python-Magic-Word-Lib Update ---
