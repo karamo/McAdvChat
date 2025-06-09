@@ -48,6 +48,7 @@ if [ ! -f "$VENV_DIR/bin/activate" ]; then
   pip install dbus_next
   pip install timezonefinder
   pip install zstandard
+  pip install requests
 else
   echo "Virtual environment already exists."
   source "$VENV_DIR/bin/activate"
@@ -56,6 +57,7 @@ else
   pip install --upgrade dbus_next
   pip install --upgrade timezonefinder
   pip install --upgrade zstandard
+  pip install --upgrade requests
 fi
 
 # 3. Check if the Python script exists
@@ -84,7 +86,9 @@ if [ ! -f "$CONFIG_DIR/$CONFIG_FILE" ]; then
   "MAX_STORAGE_SIZE_MB": 20,
   "STORE_FILE_NAME": "$HOME_DIR/mcdump.json",
   "VERSION": "v0.0.0",
-  "CALL_SIGN": "DK0XXX"
+  "CALL_SIGN": "DK0XXX",
+  "LAT":48.4031,
+  "LONG": 11.7497
 }
 EOF
   echo "now:    sudo vi $CONFIG_DIR/$CONFIG_FILE"
@@ -114,6 +118,18 @@ fi
 if ! jq -e '.CALL_SIGN' /etc/mcadvchat/config.json > /dev/null 2>&1; then
   echo "Adding a config parameter for your Callsign, to enable remote commands"
   sudo jq '.CALL_SIGN = "DK0XXX"' /etc/mcadvchat/config.json > /tmp/config.tmp && \
+  sudo mv /tmp/config.tmp /etc/mcadvchat/config.json
+fi
+
+# Stage 3: Location Check
+if ! jq -e '.LAT' /etc/mcadvchat/config.json > /dev/null 2>&1; then
+  echo "Adding a config parameter for your latitude, to enable weather reports"
+  sudo jq '.LAT = 48.4031' /etc/mcadvchat/config.json > /tmp/config.tmp && \
+  sudo mv /tmp/config.tmp /etc/mcadvchat/config.json
+fi
+if ! jq -e '.LONG' /etc/mcadvchat/config.json > /dev/null 2>&1; then
+  echo "Adding a config parameter for your longitude, to enable weather reports"
+  sudo jq '.LONG = 11.7497' /etc/mcadvchat/config.json > /tmp/config.tmp && \
   sudo mv /tmp/config.tmp /etc/mcadvchat/config.json
 fi
 
