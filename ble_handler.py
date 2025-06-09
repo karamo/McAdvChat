@@ -14,7 +14,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.38.0"
+VERSION="v0.45.0"
 
 has_console = sys.stdout.isatty()
 
@@ -644,85 +644,149 @@ class BLEClient:
         """Convert MAC address to D-Bus device path"""
         return f"/org/bluez/hci0/dev_{mac.replace(':', '_')}"
 
-    async def connect(self):
-      async with self._connect_lock:
-        if self._connected:
-             if has_console:
-                print(f"🔁 Verbindung zu {self.mac} besteht bereits")
-             return
 
+    async def connect(self, max_retries=3):
+        """Connect to BLE device with retry logic and proper error handling"""
+        async with self._connect_lock:
+            if self._connected:
+                if has_console:
+                    print(f"🔁 Verbindung zu {self.mac} besteht bereits")
+                return
+    
+            last_error = None
+            for attempt in range(max_retries):
+                try:
+                    await self._attempt_connection()
+                    return  # Success
+                except Exception as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        wait_time = min(2 ** attempt, 8)  # Exponential backoff, capped at 8 seconds
+                        if has_console:
+                            print(f"⚠️ Connection attempt {attempt + 1}/{max_retries} failed: {e}")
+                            print(f"🔄 Retrying in {wait_time}s...")
+                        await self._publish_status('connect BLE', 'info', 
+                                                 f"Attempt {attempt + 1} failed, retrying in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                        await self._cleanup_failed_connection()
+                    else:
+                        # This is the final attempt
+                        if has_console:
+                            print(f"❌ All {max_retries} connection attempts failed")
+            
+            # All attempts failed
+            await self._publish_status('connect BLE result', 'error', 
+                                     f"❌ Connection failed after {max_retries} attempts: {last_error}")
+            self._connected = False
+
+
+    async def _attempt_connection(self):
+        """Single connection attempt - extracted from current connect() method"""
         if self.bus is None:
-           self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-
+            self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+    
         introspection = await self.bus.introspect(BLUEZ_SERVICE_NAME, self.path)
         self.device_obj = self.bus.get_proxy_object(BLUEZ_SERVICE_NAME, self.path, introspection)
+        
         try:
-           self.dev_iface = self.device_obj.get_interface(DEVICE_INTERFACE)
+            self.dev_iface = self.device_obj.get_interface(DEVICE_INTERFACE)
         except InterfaceNotFoundError as e:
-           print(f"⚠️ Interface not found, device not paired: {e}")
-           await self._publish_status('connect BLE result', 'error', "Interface not found, device not paired")
-                
-           self._connected = False
-           self.bus = None
-           return
-
+            raise ConnectionError(f"Interface not found, device not paired: {e}")
+    
         self.props_iface = self.device_obj.get_interface(PROPERTIES_INTERFACE)
-
+    
         try:
-           connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
+            connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
         except DBusError as e:
-           if has_console:
-             print(f"⚠️ Fehler beim Abfragen des Verbindungsstatus: {e}")
-           await self._publish_status('connect BLE result', 'error', f"⚠️  Error checking link state: {e}")
-                
-           self._connected = False
-           return
-
+            raise ConnectionError(f"Error checking connection state: {e}")
+    
         if not connected:
-           try:
-             await self.dev_iface.call_connect()
-             if has_console:
-                print(f"✅ verbunden mit {self.mac}")
-
-           except DBusError as e:
-             self.bus = None
-             if has_console:
-                print(f"⚠️  Connect timeout: {e}")
-             await self._publish_status('connect BLE result', 'error', f"⚠️  Connect timeout: {e}")
-                    
-             return
-
+            try:
+                # Add timeout to prevent hanging
+                await asyncio.wait_for(self.dev_iface.call_connect(), timeout=10.0)
+                if has_console:
+                    print(f"✅ verbunden mit {self.mac}")
+            except asyncio.TimeoutError:
+                raise ConnectionError("Connection timeout after 10 seconds")
+            except DBusError as e:
+                raise ConnectionError(f"Connect failed: {e}")
         else:
-           if has_console:
-              print(f"🔁 Verbindung zu {self.mac} besteht bereits")
-
+            if has_console:
+                print(f"🔁 Verbindung zu {self.mac} besteht bereits")
+    
         await self._find_characteristics()
-
+    
         if not self.read_char_iface or not self.write_char_iface:
-            print("❌ Charakteristica not found")
-            await self._publish_status('connect BLE result', 'error', "❌ connection not established, not yet paired")
-
-            self._connected = False
-            self.bus = None
-            return
+            raise ConnectionError("Characteristics not found - device not properly paired")
         
         self.read_props_iface = self.read_char_obj.get_interface(PROPERTIES_INTERFACE)
-
+    
+        # Verify services are resolved
         try:
-          is_notifying = (await self.read_props_iface.call_get(GATT_CHARACTERISTIC_INTERFACE, "Notifying")).value
+            services_resolved = (await self.props_iface.call_get(DEVICE_INTERFACE, "ServicesResolved")).value
+            if not services_resolved:
+                # Wait a bit for services to resolve
+                await asyncio.sleep(2)
+                services_resolved = (await self.props_iface.call_get(DEVICE_INTERFACE, "ServicesResolved")).value
+                if not services_resolved:
+                    raise ConnectionError("Services not resolved after connection")
         except DBusError as e:
-             print(f"⚠️ Fehler beim Abfragen von Notifying: {e}")
-
+            if has_console:
+                print(f"⚠️ Warning: Could not check ServicesResolved: {e}")
+    
         self._connected = True
         await self._publish_status('connect BLE result', 'ok', "connection established, downloading config ..")
-
-        print("▶️  Starting time sync task ..")
+    
+        # Start background tasks
+        if has_console:
+            print("▶️  Starting time sync task ..")
         self._time_sync = TimeSyncTask(self._handle_timesync)
         self._time_sync.start()
        
-        print("▶️  Starting keep alive ..")
+        if has_console:
+            print("▶️  Starting keep alive ..")
         if not self._keepalive_task or self._keepalive_task.done():
             self._keepalive_task = asyncio.create_task(self._send_keepalive())
+    
+    async def _cleanup_failed_connection(self):
+        """Clean up after a failed connection attempt"""
+        try:
+            if self.dev_iface:
+                try:
+                    await asyncio.wait_for(self.dev_iface.call_disconnect(), timeout=3.0)
+                except:
+                    pass  # Ignore errors during cleanup
+            
+            if self.bus:
+                self.bus.disconnect()
+            
+            # Reset all state
+            self.bus = None
+            self.device_obj = None
+            self.dev_iface = None
+            self.read_char_iface = None
+            self.read_props_iface = None
+            self.write_char_iface = None
+            self.props_iface = None
+            self._connected = False
+            
+            # Stop background tasks if they exist
+            if self._time_sync is not None:
+                await self._time_sync.stop()
+                self._time_sync = None
+    
+            if self._keepalive_task and not self._keepalive_task.done():
+                self._keepalive_task.cancel()
+                try:
+                    await self._keepalive_task
+                except asyncio.CancelledError:
+                    pass
+                self._keepalive_task = None
+            
+        except Exception as e:
+            if has_console:
+                print(f"⚠️ Error during cleanup: {e}")
+
                 
     async def _publish_status(self, command, result, msg):
         """Helper method to publish BLE status messages through router"""

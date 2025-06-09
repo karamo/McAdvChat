@@ -27,7 +27,7 @@ import time
 
 from collections import deque, defaultdict
 
-VERSION="v0.40.0"
+VERSION="v0.45.0"
 
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
@@ -72,9 +72,21 @@ class MessageRouter:
     async def _udp_message_handler(self, routed_message):
         """Handle UDP messages from WebSocket and route to UDP handler"""
         message_data = routed_message['data']
-        
+
         if has_console:
-            print(f"📡 UDP Message Handler: Sending message to mesh network")
+            print(f"📡 UDP Message Handler: Processing message to {message_data.get('dst')}")
+    
+        # Check if this is a self-message first
+        is_self_message = await self._handle_outgoing_message(message_data, 'udp')
+    
+        if is_self_message:
+            if has_console:
+                print(f"📡 UDP Message Handler: Self-message handled, not sending to mesh")
+            return
+    
+        # External message - send to mesh network
+        if has_console:
+            print(f"📡 UDP Message Handler: Sending external message to mesh network")
             
         # Get the UDP protocol handler
         udp_handler = self.get_protocol('udp')
@@ -101,7 +113,6 @@ class MessageRouter:
                 'msg': "UDP handler not available",
                 'timestamp': int(time.time() * 1000)
             })
-        
 
     async def _ble_message_handler(self, routed_message):
         """Handle BLE messages from WebSocket and route to BLE client"""
@@ -111,17 +122,21 @@ class MessageRouter:
         dst = message_data.get('dst')
         
         if has_console:
-            print(f"📱 BLE Message Handler: Sending '{msg}' to '{dst}'")
-
-        if self._is_message_to_self(message_data):
+            print(f"📱 BLE Message Handler: Processing message '{msg}' to '{dst}'")
+    
+        # Check if this is a self-message first
+        is_self_message = await self._handle_outgoing_message(message_data, 'ble')
+        
+        if is_self_message:
             if has_console:
-                print(f"🔄 MessageRouter: Detected self-message to {dst}, routing to CommandHandler only")
-            synthetic_message = self._create_synthetic_message(message_data)
-            await self._route_to_command_handler(synthetic_message)
-        else:
-            if has_console:
-                print(f"📡 MessageRouter: External message, routing to BLE handler")
-            await handle_ble_message(msg, dst)
+                print(f"📱 BLE Message Handler: Self-message handled, not sending to device")
+            return
+        
+        # External message - send to BLE device
+        if has_console:
+            print(f"📱 BLE Message Handler: Sending external message to BLE device")
+        await handle_ble_message(msg, dst)
+        
 
 
     async def _storage_handler(self, routed_message):
@@ -359,7 +374,7 @@ class MessageRouter:
         #return dst == self.my_callsign and msg.startswith('!')
         return dst == self.my_callsign
 
-    def _create_synthetic_message(self, original_message):
+    def _create_synthetic_message(self, original_message, protocol_type='udp'):
         """Create a synthetic message that looks like it came from LoRa"""
         current_time = int(time.time())
         msg_id = f"{current_time:08X}"  # Hex timestamp as msg_id
@@ -370,9 +385,23 @@ class MessageRouter:
             'msg': original_message.get('msg'),
             'msg_id': msg_id,
             'type': 'msg',
-            'src_type': 'ble',  # Keep as 'ble' to avoid breaking application logic
+            'src_type': protocol_type,  # Use the actual protocol type
             'timestamp': current_time * 1000
         }
+
+
+
+    async def _handle_outgoing_message(self, message_data, protocol_type='udp'):
+        """Unified handler for outgoing messages - handles self-message detection"""
+        
+        if self._is_message_to_self(message_data):
+            if has_console:
+                print(f"🔄 MessageRouter: Detected self-message to {message_data.get('dst')}, routing to CommandHandler only")
+            synthetic_message = self._create_synthetic_message(message_data)
+            await self._route_to_command_handler(synthetic_message)
+            return True  # Indicates message was handled as self-message
+        
+        return False  # Indicates message should be sent to external protocol
 
     async def _route_to_command_handler(self, synthetic_message):
         """Route synthetic message to CommandHandler"""
@@ -414,7 +443,8 @@ async def main():
     message_router.set_callsign(CALL_SIGN)
 
     #Command Handler Plugin
-    command_handler = create_command_handler(message_router, storage_handler, CALL_SIGN)
+    command_handler = create_command_handler(message_router, storage_handler, CALL_SIGN, LAT, LONG, STAT_NAME)
+
     message_router.register_protocol('commands', command_handler)
 
     udp_handler = UDPHandler(
@@ -494,6 +524,11 @@ if __name__ == "__main__":
 
     has_console = sys.stdout.isatty()
     config = load_config()
+
+    LAT = config["LAT"]
+    LONG = config["LONG"]
+    STAT_NAME = config["STAT_NAME"]
+    print(f"WX Service for {STAT_NAME} {LAT}/{LONG}")
 
 
     UDP_PORT_list = config["UDP_PORT_list"]

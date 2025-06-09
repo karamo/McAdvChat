@@ -85,10 +85,11 @@ if [ ! -f "$CONFIG_DIR/$CONFIG_FILE" ]; then
   "PRUNE_HOURS": 168,
   "MAX_STORAGE_SIZE_MB": 20,
   "STORE_FILE_NAME": "$HOME_DIR/mcdump.json",
-  "VERSION": "v0.0.0",
+  "VERSION": "v0.1.0",
   "CALL_SIGN": "DK0XXX",
   "LAT":48.4031,
-  "LONG": 11.7497
+  "LONG": 11.7497,
+  "STAT_NAME": "Freising"
 }
 EOF
   echo "now:    sudo vi $CONFIG_DIR/$CONFIG_FILE"
@@ -130,6 +131,11 @@ fi
 if ! jq -e '.LONG' /etc/mcadvchat/config.json > /dev/null 2>&1; then
   echo "Adding a config parameter for your longitude, to enable weather reports"
   sudo jq '.LONG = 11.7497' /etc/mcadvchat/config.json > /tmp/config.tmp && \
+  sudo mv /tmp/config.tmp /etc/mcadvchat/config.json
+fi
+if ! jq -e '.STAT_NAME' /etc/mcadvchat/config.json > /dev/null 2>&1; then
+  echo "Adding a config parameter for your Station, to enable weather reports"
+  sudo jq '.STAT_NAME = "Freising" ' /etc/mcadvchat/config.json > /tmp/config.tmp && \
   sudo mv /tmp/config.tmp /etc/mcadvchat/config.json
 fi
 

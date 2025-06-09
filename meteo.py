@@ -3,7 +3,6 @@
 Wetter-Service für Ham Radio LoRa Integration - HYBRID VERSION
 DWD BrightSky als Primärquelle + OpenMeteo für fehlende Parameter
 Intelligente Daten-Fusion für optimale Genauigkeit
-Standort: 85354 Freising, Deutschland
 """
 
 import requests
@@ -15,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, Any, List
 import time
 
-VERSION="v0.40.0"
+VERSION="v0.45.0"
 
 # Logging Setup
 logging.basicConfig(
@@ -37,10 +36,10 @@ class WeatherService:
     Optimale Datenqualität durch intelligente Fusion
     """
     
-    def __init__(self, max_age_minutes: int = 30):
-        # Freising Koordinaten (85354)
-        self.freising_lat = 48.4031
-        self.freising_lon = 11.7497
+    def __init__(self, lat = 48.4031, lon = 11.7497, stat_name = "Freising", max_age_minutes: int = 30):
+        self.freising_lat = lat
+        self.freising_lon = lon
+        self.stat_name = stat_name
         
         # Maximales Alter der Wetterdaten in Minuten
         self.max_age_minutes = max_age_minutes
@@ -49,7 +48,7 @@ class WeatherService:
         self.timeout = 10
         self.max_retries = 2
         
-        logger.info(f"WeatherService initialisiert für Freising (85354), Hybrid-Modus: DWD + OpenMeteo")
+        logger.info(f"WeatherService initialisiert für {self.stat_name} {self.freising_lat}/{self.freising_lon}, Hybrid-Modus: DWD + OpenMeteo")
     
     def get_weather_data(self) -> Dict[str, Any]:
         """
@@ -66,7 +65,16 @@ class WeatherService:
             # Zeitvalidierung für DWD
             age_check = self._validate_data_age(dwd_data)
             if age_check["valid"]:
-                logger.info(f"✅ DWD-Daten verfügbar und aktuell ({age_check['age_minutes']:.1f} Min alt)")
+
+                if not self._has_valid_core_data(dwd_data):
+                    logger.warning("❌ DWD liefert None für Kernparameter → Fallback auf OpenMeteo")
+                    dwd_data = None  # DWD verwerfen
+                else:
+                    logger.info(f"✅ DWD-Daten verfügbar und aktuell ({age_check['age_minutes']:.1f} Min alt)")
+
+            elif not self._has_valid_core_data(dwd_data):
+                logger.warning("⚠️  DWD liefert None-Werte → Fallback auf OpenMeteo")
+                dwd_data = None
             else:
                 logger.warning(f"⚠️  DWD-Daten zu alt: {age_check['reason']}")
                 dwd_data = None  # Verwerfe alte DWD-Daten
@@ -91,7 +99,7 @@ class WeatherService:
             return {
                 "error": "Alle Wetter-APIs nicht verfügbar",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "location": "Freising (85354)"
+                "location": f"{self.freising_lat}/{self.freising_lon}"
             }
         elif dwd_data is None:
             # Nur OpenMeteo verfügbar
@@ -111,7 +119,37 @@ class WeatherService:
             fused_data = self._fuse_weather_data(dwd_data, openmeteo_data)
             fused_data["timestamp"] = datetime.now(timezone.utc).isoformat()
             return fused_data
+
+    def _has_valid_core_data(self, weather_data: Dict[str, Any]) -> bool:
+        """
+        Prüfe ob die wichtigsten Wetterdaten verfügbar sind
+        Wenn DWD None für Kernparameter liefert → Fallback auf OpenMeteo
+        """
+        # Definiere kritische Kernparameter
+        core_params = [
+            ("temperatur_celsius", "Temperatur"),
+            ("luftdruck_hpa", "Luftdruck")
+        ]
+        
+        invalid_params = []
+        
+        for param, param_name in core_params:
+            value = weather_data.get(param)
+            if value is None:
+                invalid_params.append(param_name)
+                logger.debug(f"❌ DWD {param_name}: None")
+            else:
+                logger.debug(f"✅ DWD {param_name}: {value}")
+        
+        if invalid_params:
+            logger.warning(f"❌ DWD liefert None für kritische Parameter: {', '.join(invalid_params)}")
+            return False
+        
+        logger.info("✅ DWD Kernparameter sind gültig")
+        return True
     
+
+
     def _fuse_weather_data(self, dwd_data: Dict[str, Any], openmeteo_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Intelligente Daten-Fusion: DWD hat Priorität, OpenMeteo ergänzt fehlende Werte
@@ -372,12 +410,14 @@ class WeatherService:
         params = {
             "latitude": self.freising_lat,
             "longitude": self.freising_lon,
-            "current": "temperature_2m,relative_humidity_2m,surface_pressure,cloud_cover,wind_speed_10m,wind_direction_10m,visibility,precipitation",
+            "current": "temperature_2m,relative_humidity_2m,pressure_msl,cloud_cover,wind_speed_10m,wind_direction_10m,visibility,precipitation",
             "timezone": "Europe/Berlin"
         }
         
         response = self._make_request(url, params)
         data = response.json()
+
+        print("openmeteo debug:",data)
         
         if "current" not in data:
             raise WeatherServiceError("Keine aktuellen Open-Meteo-Daten verfügbar")
@@ -387,7 +427,7 @@ class WeatherService:
         return {
             "temperatur_celsius": self._safe_float(current.get("temperature_2m")),
             "luftfeuchtigkeit_prozent": self._safe_int(current.get("relative_humidity_2m")),
-            "luftdruck_hpa": self._safe_float(current.get("surface_pressure")),
+            "luftdruck_hpa": self._safe_float(current.get("pressure_msl")),
             "windgeschwindigkeit_kmh": self._safe_float(current.get("wind_speed_10m")),
             "windrichtung_grad": self._safe_int(current.get("wind_direction_10m")),
             "wolkenbedeckung_prozent": self._safe_int(current.get("cloud_cover")),
@@ -451,11 +491,21 @@ class WeatherService:
     def format_for_lora(self, weather_data: Dict[str, Any]) -> str:
         """Ham Radio optimiertes LoRa-Format"""
         if "error" in weather_data:
-            return f"WX Freising ERR: {weather_data['error'][:25]}"
+            return f"WX ERR: {weather_data['error'][:25]}"
         
-        temp = weather_data.get("temperatur_celsius", 0) or 0
-        humid = weather_data.get("luftfeuchtigkeit_prozent", 0) or 0
-        press = weather_data.get("luftdruck_hpa", 0) or 0
+        temp = weather_data.get("temperatur_celsius", 0)
+        humid = weather_data.get("luftfeuchtigkeit_prozent", 0)
+        press = weather_data.get("luftdruck_hpa", 0)
+
+        if temp is None:
+            temp = 0.0
+            logger.warning("⚠️  Temperatur None → 0.0")
+        if humid is None:
+            humid = 0
+            logger.warning("⚠️  Luftfeuchtigkeit None → 0")
+        if press is None:
+            press = 0.0
+            logger.warning("⚠️  Luftdruck None → 0.0" )
         
         # Wind
         wind_speed = weather_data.get("windgeschwindigkeit_kmh", 0) or 0
@@ -478,10 +528,10 @@ class WeatherService:
         rain_mm = weather_data.get("niederschlag_mm", 0) or 0
         rain_info = f", {rain_mm:.1f}mm rain" if rain_mm > 0.1 else ""
         
-        lora_msg = f"🌤️ WX Freising: {temp:.1f}C {humid}% rF, {press:.1f}hPa, {wind_info}, {cloud_desc}{rain_info}"
+        lora_msg = f"🌤️ WX {self.stat_name}: {temp:.1f}C {humid}% rF, {press:.1f}hPa, {wind_info}, {cloud_desc}{rain_info}"
         
         if len(lora_msg) > 149:
-            lora_msg = f"WX Freising: {temp:.1f}C {humid}%rF {press:.1f}hPa {wind_info} {cloud_desc}{rain_info}"
+            lora_msg = f"WX {self.stat_name}: {temp:.1f}C {humid}%rF {press:.1f}hPa {wind_info} {cloud_desc}{rain_info}"
         
         return lora_msg
 
@@ -539,23 +589,23 @@ class WeatherService:
         fusion_info = ""
         if "supplemented_parameters" in weather_data and weather_data["supplemented_parameters"]:
             supplemented = ", ".join(weather_data["supplemented_parameters"])
-            fusion_info = f"🔗  Fusion:         {supplemented} von OpenMeteo ergänzt\n"
+            fusion_info = f"🔗 Fusion:         {supplemented} von OpenMeteo ergänzt\n"
         
         quality_info = ""
         if "data_quality" in weather_data:
-            quality_info = f"⭐  Qualität:       {weather_data['data_quality']}\n"
+            quality_info = f"⭐ Qualität:       {weather_data['data_quality']}\n"
         
         # Zusätzliche Infos
         extra_info = ""
         if weather_data.get("data_source", "").startswith("DWD") and "taupunkt_celsius" in weather_data:
-            extra_info = f"🌡️  Taupunkt:       {weather_data.get('taupunkt_celsius', 'N/A')}°C\n"
+            extra_info = f"🌡️ Taupunkt:       {weather_data.get('taupunkt_celsius', 'N/A')}°C\n"
         
         # Niederschlag
         rain_mm = weather_data.get("niederschlag_mm", 0) or 0
         rain_info = f"🌧️  Niederschlag:   {rain_mm:.1f} mm\n" if rain_mm > 0 else ""
         
         report = f"""
-🌤️  WETTER FREISING (85354) - {weather_data.get('timestamp', 'N/A')[:19]}
+🌤️  {self.stat_name} {self.freising_lat}/{self.freising_lon} - {weather_data.get('timestamp', 'N/A')[:19]}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🌡️  Temperatur:     {temp}°C
@@ -574,12 +624,22 @@ class WeatherService:
 
 def main():
     """Produktions-Version"""
+    #Freising
+    stat_name="Freising"
+    lat = 48.4031
+    lon = 11.7497
+
+    #Leonding, OÖ
+    #stat_name="Leonding"
+    #lat = 48.279331
+    #lon = 14.248746
+
     print("🚀 Ham Radio Wetter-Service - HYBRID VERSION")
     print("🔗 DWD BrightSky primär + OpenMeteo Ergänzung")
-    print(f"📍 Standort: Freising (85354), Deutschland")
+    print(f"📍 Standort: {lat}/{lon}")
     print("-" * 70)
     
-    weather_service = WeatherService(max_age_minutes=30)
+    weather_service = WeatherService(lat, lon, stat_name, max_age_minutes=30)
     
     try:
         weather_data = weather_service.get_weather_data()
