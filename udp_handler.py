@@ -5,7 +5,7 @@ import json
 import time
 import unicodedata
 
-VERSION="v0.46.0"
+VERSION="v0.47.0"
 
 
 def is_allowed_char(ch: str) -> bool:
@@ -174,8 +174,8 @@ class UDPHandler:
             json_data = json.dumps(message_data).encode("utf-8")
             await loop.run_in_executor(None, udp_sock.sendto, json_data, self.target_address)
             
-            if has_console:
-                print(f"UDP message sent to {self.target_address}: {message_data}")
+            #if has_console:
+            #    print(f"UDP message sent to {self.target_address}: {message_data}")
                 
         except Exception as e:
             print(f"Error sending UDP message: {e}")
