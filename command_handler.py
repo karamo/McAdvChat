@@ -17,14 +17,15 @@ MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
 MAX_CHUNKS = 3            # Maximum number of response chunks
 MSG_DELAY = 12  
 
+DEFAULT_THROTTLE_TIMEOUT = 5 * 60  # 5 minutes default
+
 COMMAND_THROTTLING = {
-    'dice': 5,      # 20 seconds for dice games
-    'time': 5,      # 30 seconds for time requests
+    'dice': 5,      # 5 seconds for dice games
+    'time': 5,      # 5 seconds for time requests
     'group': 5,
-    # All other commands use default 10 minutes
+    # All other commands use default 5 minutes
 }
 
-DEFAULT_THROTTLE_TIMEOUT = 5 * 60  # 5 minutes default
 
 has_console = sys.stdout.isatty()
 
@@ -51,13 +52,13 @@ COMMANDS = {
     'mheard': {
         'handler': 'handle_mheard',
         'args': ['limit'],
-        'format': '!mheard limit:N',
+        'format': '!mheard type:all|msg|pos limit:N',
         'description': 'Show recently heard stations'
     },
     'mh': {
         'handler': 'handle_mheard',
         'args': ['limit'],
-        'format': '!mheard limit:N',
+        'format': '!mheard type:all|msg|pos limit:N',
         'description': 'Show recently heard stations'
     },
     'pos': {
@@ -576,7 +577,7 @@ class CommandHandler:
                 kwargs[key.lower()] = value
             else:
                 # Handle positional arguments for simple commands
-                if cmd == 'search' and not kwargs:
+                if cmd in ['s', 'search'] and not kwargs:
                     kwargs['call'] = part
 
                 elif cmd == 'pos' and not kwargs:
@@ -588,11 +589,14 @@ class CommandHandler:
                     except ValueError:
                         pass
 
-                elif cmd == 'mheard' and not kwargs:
+                elif cmd in ['mh', 'mheard'] and not kwargs:
                     try:
                         kwargs['limit'] = int(part)
                     except ValueError:
-                        pass
+                        if part.lower() in ['msg', 'pos', 'all']:
+                            kwargs['type'] = part.lower()
+                        else:
+                            pass
 
                 elif cmd == 'group' and not kwargs:
                     kwargs['state'] = part
@@ -854,6 +858,208 @@ class CommandHandler:
         return response
 
     async def handle_mheard(self, kwargs, requester):
+        """Show recently heard stations with optional type filtering"""
+        limit = int(kwargs.get('limit', 5))
+        msg_type = kwargs.get('type', 'all').lower()
+        
+        if not self.storage_handler:
+            return "❌ Message storage not available"
+            
+        # Collect station data
+        stations = defaultdict(lambda: {'last_msg': 0, 'msg_count': 0, 'last_pos': 0, 'pos_count': 0})
+        
+        for item in list(self.storage_handler.message_store)[-4000:]:
+            try:
+                raw_data = json.loads(item["raw"])
+                data_type = raw_data.get('type', '')
+                src = raw_data.get('src', '')
+                timestamp = raw_data.get('timestamp', 0)
+                
+                if data_type not in ['msg', 'pos'] or not src:
+                    continue
+                    
+                call = src.split(',')[0]
+                
+                if data_type == 'msg':
+                    stations[call]['msg_count'] += 1
+                    if timestamp > stations[call]['last_msg']:
+                        stations[call]['last_msg'] = timestamp
+                elif data_type == 'pos':
+                    stations[call]['pos_count'] += 1
+                    if timestamp > stations[call]['last_pos']:
+                        stations[call]['last_pos'] = timestamp
+                        
+            except (json.JSONDecodeError, KeyError):
+                continue
+        
+        # Build response lines
+        lines = []
+        
+        if msg_type in ['all', 'msg']:
+            msg_stations = [(call, data['msg_count'], data['last_msg']) 
+                           for call, data in stations.items() if data['msg_count'] > 0]
+            if msg_stations:
+                msg_stations.sort(key=lambda x: x[2], reverse=True)
+                msg_entries = [f"{call} @{time.strftime('%H:%M', time.localtime(ts/1000))} ({count})" 
+                              for call, count, ts in msg_stations[:limit]]
+                lines.append("📻 MH: 💬 " + " | ".join(msg_entries))
+        
+        if msg_type in ['all', 'pos']:
+            pos_stations = [(call, data['pos_count'], data['last_pos']) 
+                           for call, data in stations.items() if data['pos_count'] > 0]
+            if pos_stations:
+                pos_stations.sort(key=lambda x: x[2], reverse=True)
+                pos_entries = [f"{call} @{time.strftime('%H:%M', time.localtime(ts/1000))} ({count})" 
+                              for call, count, ts in pos_stations[:limit]]
+                lines.append("      📍 " + " | ".join(pos_entries))
+        
+        if not lines:
+            return "📻 No activity found"
+        
+        # Join lines with padding separator for chunking
+        if len(lines) == 1:
+            return lines[0]
+        else:
+            # Pad first line to force chunk break
+            line1 = lines[0]
+            padding_needed = max(0, 138 - len(line1.encode('utf-8')))
+            return line1 + " " * padding_needed + ", " + lines[1]
+
+
+
+
+
+    async def handle_mheard_newer(self, kwargs, requester):
+        """Show recently heard stations from both messages and positions with optional type filtering"""
+        limit = int(kwargs.get('limit', 5))
+        msg_type = kwargs.get('type', 'all').lower()  # 'msg', 'pos', 'all'
+        
+        if not self.storage_handler:
+            return "❌ Message storage not available"
+            
+        # Track both message and position activity
+        stations = defaultdict(lambda: {
+            'last_msg': 0, 'msg_count': 0,
+            'last_pos': 0, 'pos_count': 0,
+            'last_activity': 0
+        })
+        
+        for item in list(self.storage_handler.message_store)[-4000:]:
+            try:
+                raw_data = json.loads(item["raw"])
+                src = raw_data.get('src', '')
+                timestamp = raw_data.get('timestamp', 0)
+                data_type = raw_data.get('type', '')
+    
+                if data_type not in ['msg', 'pos'] or not src:
+                    continue
+                    
+                call = src.split(',')[0]
+                
+                if data_type == 'msg':
+                    stations[call]['msg_count'] += 1
+                    if timestamp > stations[call]['last_msg']:
+                        stations[call]['last_msg'] = timestamp
+                elif data_type == 'pos':
+                    stations[call]['pos_count'] += 1
+                    if timestamp > stations[call]['last_pos']:
+                        stations[call]['last_pos'] = timestamp
+                
+                # Track overall last activity
+                if timestamp > stations[call]['last_activity']:
+                    stations[call]['last_activity'] = timestamp
+                    
+            except (json.JSONDecodeError, KeyError):
+                continue
+        
+        # Separate stations by activity type
+        msg_stations = []
+        pos_stations = []
+        
+        # Sort all stations by last activity first
+        sorted_stations = sorted(
+            stations.items(), 
+            key=lambda x: x[1]['last_activity'], 
+            reverse=True
+        )
+        
+        # Build separate lists for msg and pos based on their respective last activity
+        for call, data in sorted_stations:
+            if data['msg_count'] > 0:
+                msg_stations.append((call, data, data['last_msg']))
+            if data['pos_count'] > 0:
+                pos_stations.append((call, data, data['last_pos']))
+        
+        # Sort each list by their specific activity type and limit
+        msg_stations.sort(key=lambda x: x[2], reverse=True)
+        pos_stations.sort(key=lambda x: x[2], reverse=True)
+        
+        msg_stations = msg_stations[:limit]
+        pos_stations = pos_stations[:limit]
+        
+        # Build response parts based on type parameter
+        response_parts = []
+        
+        if msg_type in ['all', 'msg'] and msg_stations:
+            msg_entries = []
+            for call, data, last_time in msg_stations:
+                time_str = time.strftime('%H:%M', time.localtime(last_time/1000))
+                msg_entries.append(f"{call} @{time_str} ({data['msg_count']})")
+            
+            msg_line = "📻 MH: 💬 " + " | ".join(msg_entries)
+            response_parts.append(msg_line)
+            
+        if msg_type in ['all', 'pos'] and pos_stations:
+            pos_entries = []
+            for call, data, last_time in pos_stations:
+                time_str = time.strftime('%H:%M', time.localtime(last_time/1000))
+                pos_entries.append(f"{call} @{time_str} ({data['pos_count']})")
+            
+            pos_line = "      📍 " + " | ".join(pos_entries)
+            response_parts.append(pos_line)
+        
+        # Handle response building with chunking strategy
+        if not response_parts:
+            return "📻 No activity found"
+        
+        if len(response_parts) == 1:
+            # Single line response (either msg-only or pos-only)
+            return response_parts[0]
+        
+        if len(response_parts) == 2:
+            # Two-line response (msg + pos) - use padding strategy
+            line1 = response_parts[0]
+            line2 = response_parts[1]
+            
+            # Pad first line to force clean chunk boundary
+            padded_line1 = self._pad_for_chunk_break(line1)
+            return padded_line1 + line2
+        
+        return response_parts[0]  # Fallback
+    
+    #def _pad_for_chunk_break(self, text, target_length=138):
+    def _pad_for_chunk_break(self, text, target_length=MAX_RESPONSE_LENGTH-2):
+        """Pad text to force clean chunk boundary using byte-aware calculation"""
+        text_bytes = text.encode('utf-8')
+        
+        if len(text_bytes) < target_length:
+            # Calculate padding needed in bytes
+            padding_needed = target_length - len(text_bytes)
+            # Use spaces for padding (1 byte each)
+            padded_text = text + " " * padding_needed + ", "
+        else:
+            # Text is already at or over target, just add separator
+            padded_text = text + ", "
+        
+        if has_console:
+            original_bytes = len(text.encode('utf-8'))
+            padded_bytes = len(padded_text.encode('utf-8'))
+            print(f"🔍 Padding: '{text[:30]}...' {original_bytes}→{padded_bytes} bytes")
+        
+        return padded_text
+
+
+    async def handle_mheard_old(self, kwargs, requester):
         """Show recently heard stations"""
         limit = int(kwargs.get('limit', 5))
         
@@ -933,6 +1139,7 @@ class CommandHandler:
                 rssi = raw_data.get('rssi')
                 snr = raw_data.get('snr')
                 firmware = raw_data.get('firmware', '')
+                fw_sub = raw_data.get('fw_sub', '')
                 lora_mod = raw_data.get('lora_mod')
                 hw_id = raw_data.get('hw_id')
                 
@@ -955,9 +1162,11 @@ class CommandHandler:
                     if snr is not None:
                         response += f" / SNR {snr}"
                 
-                    # Add firmware if available
+                    # Add firmware and subversion, if available
                     if firmware:
                         response += f" / FW: {firmware}"
+                    if fw_sub:
+                        response += f"{fw_sub}"
                 
                     # Add modulation info
                     if lora_mod is not None:
@@ -1117,34 +1326,42 @@ class CommandHandler:
             if has_console:
                 print(f"📋 CommandHandler: Sent response chunk {i+1} to {recipient}")
 
+
     def _chunk_response(self, response):
-        """Split response into chunks that fit message size limits"""
-        if len(response) <= MAX_RESPONSE_LENGTH:
-            return [response]
-            
-        chunks = []
-        lines = response.split(', ')
-        current_chunk = ""
+        """Split response into chunks - simple and robust"""
+        max_bytes = MAX_RESPONSE_LENGTH
         
-        for line in lines:
-            # If adding this line would exceed limit, start new chunk
-            if len(current_chunk) + len(line) + 1 > MAX_RESPONSE_LENGTH:
-                if current_chunk:
-                    chunks.append(current_chunk.rstrip())
-                    current_chunk = line
-                else:
-                    # Single line too long, truncate it
-                    chunks.append(line[:MAX_RESPONSE_LENGTH-3] + "...")
+        # Single chunk fits?
+        if len(response.encode('utf-8')) <= max_bytes:
+            return [response]
+        
+        chunks = []
+        
+        # Split on padding separator first (for our two-line responses)
+        if ', ' in response and len(response.split(', ')) == 2:
+            chunks = response.split(', ')
+        else:
+            # Split long single responses on station boundaries
+            if ' | ' in response:
+                parts = response.split(' | ')
+                current = ""
+                
+                for part in parts:
+                    test = current + (" | " if current else "") + part
+                    if len(test.encode('utf-8')) <= max_bytes:
+                        current = test
+                    else:
+                        if current:
+                            chunks.append(current)
+                        current = part
+                
+                if current:
+                    chunks.append(current)
             else:
-                if current_chunk:
-                    current_chunk += "\n" + line
-                else:
-                    current_chunk = line
-                    
-        if current_chunk:
-            chunks.append(current_chunk.rstrip())
-            
-        return chunks
+                # Fallback: character-wise split
+                chunks = [response[i:i+max_bytes] for i in range(0, len(response), max_bytes)]
+        
+        return chunks[:MAX_CHUNKS]
 
 
 # Integration function for your main script
