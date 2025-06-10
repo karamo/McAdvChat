@@ -11,6 +11,8 @@ from ble_handler import (
 
 from command_handler import create_command_handler
 
+VERSION="v0.46.0"
+
 import asyncio
 import errno
 import json
@@ -27,7 +29,6 @@ import time
 
 from collections import deque, defaultdict
 
-VERSION="v0.45.0"
 
 CONFIG_FILE = "/etc/mcadvchat/config.json"
 if os.getenv("MCADVCHAT_ENV") == "dev":
@@ -464,7 +465,6 @@ async def main():
     
     try:
           await websocket_manager.start_server()
-          #ws_server = websocket_manager.server  # For shutdown compatibility
     except OSError as e:
       if e.errno == errno.EADDRINUSE:
            print(f"❌ Address {WS_HOST}:{WS_PORT} already in use.")
@@ -488,12 +488,32 @@ async def main():
                 loop.call_soon_threadsafe(stop_event.set)
                 break
 
-    def handle_shutdown():
-       print("🛡️ Signal received, stopping proxy service ..")
-       loop.call_soon_threadsafe(stop_event.set)
+    # Signal handling with fallback
+    shutdown_requested = False
 
-    for sig in (signal.SIGINT, signal.SIGTERM):
-       loop.add_signal_handler(sig, handle_shutdown)
+    def handle_shutdown(signum=None, frame=None):
+        print(f"🛡️ Signal {signum or 'SIGINT'} received, stopping proxy service ..")
+        if stop_event.is_set():
+            print("🛡️ Force shutdown - second signal received")
+            import os
+            os._exit(1)  # Force exit if called twice
+        stop_event.set()
+    
+    # Try asyncio signal handlers first (preferred)
+    try:
+        loop.add_signal_handler(signal.SIGINT, handle_shutdown)
+        loop.add_signal_handler(signal.SIGTERM, handle_shutdown)
+        signal_method = "asyncio"
+    except Exception as e:
+        # Fallback to traditional signal handlers
+        print(f"⚠️ Could not set asyncio signal handlers: {e}")
+        signal.signal(signal.SIGINT, handle_shutdown)
+        signal.signal(signal.SIGTERM, handle_shutdown)
+        signal_method = "traditional"
+    
+    if has_console:
+        print(f"🛡️ Signal handling: {signal_method}")
+    
 
     if sys.stdin.isatty():
        print("Drücke 'q' + Enter zum Beenden und Speichern")
@@ -504,20 +524,48 @@ async def main():
     print(f"MessageRouter: {len(message_router._subscribers)} message types, {len(message_router._protocols)} protocols")
 
     await stop_event.wait()
+    
+    print("🛑 Stopping proxy server, saving to disc ..")
+    
+    # Clean shutdown sequence with timeouts
+    try:
+        # Step 1: Disconnect BLE with timeout
+        print("🛑 Disconnecting BLE...")
+        await asyncio.wait_for(
+            message_router.route_command("disconnect BLE"), 
+            timeout=5.0
+        )
+    except asyncio.TimeoutError:
+        print("⚠️ BLE disconnect timeout")
+    
+    try:
+        # Step 2: Stop UDP handler
+        print("🛑 Stopping UDP handler...")
+        await asyncio.wait_for(udp_handler.stop_listening(), timeout=3.0)
+    except asyncio.TimeoutError:
+        print("⚠️ UDP stop timeout")
+    
+    try:
+        # Step 3: Stop WebSocket server
+        print("🛑 Stopping WebSocket server...")
+        await asyncio.wait_for(websocket_manager.stop_server(), timeout=3.0)
+    except asyncio.TimeoutError:
+        print("⚠️ WebSocket stop timeout")
+    
+    print("🛑 All services stopped")
+    
+    # Save data
+    try:
+        storage_handler.save_dump(store_file_name)
+        print("✅ Data saved successfully")
+    except Exception as e:
+        print(f"⚠️ Error saving data: {e}")
+    
+    print("✅ Shutdown complete")
 
-    print("Stopping proxy server, saving to disc ..")
-
-    await message_router.route_command("disconnect BLE")
-
-    await udp_handler.stop_listening()
-
-    await websocket_manager.stop_server()
-
-    print("all closed")
-
-    storage_handler.save_dump(store_file_name)
-
-    print("saved message data and exitting now.")
+    # Force clean process exit after successful cleanup
+    import os
+    os._exit(0)
 
 
 if __name__ == "__main__":
@@ -554,4 +602,6 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
        print("Manuell beendet mit Ctrl+C")
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
 

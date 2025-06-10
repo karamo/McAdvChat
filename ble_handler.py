@@ -14,7 +14,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.45.0"
+VERSION="v0.46.0"
 
 has_console = sys.stdout.isatty()
 
@@ -33,6 +33,7 @@ client = None
 
 # Console detection
 has_console = sys.stdout.isatty()
+
 
 
 def get_current_timestamp() -> str:
@@ -376,7 +377,9 @@ def transform_common_fields(input_dict):
     return {
         "transformer1": "common_fields",
         "src_type": "ble",
-        "firmware": str(input_dict.get("fw","")) + ascii_char(input_dict.get("fw_subver")),
+        #"firmware": str(input_dict.get("fw","")) + ascii_char(input_dict.get("fw_subver")),
+        "firmware": input_dict.get("fw",""),
+        "fw_sub": input_dict.get("fw_sub"),
         "via": input_dict.get("path"),
         "max_hop": input_dict.get("max_hop"),
         "mesh_info": input_dict.get("mesh_info"),
@@ -661,7 +664,8 @@ class BLEClient:
                 except Exception as e:
                     last_error = e
                     if attempt < max_retries - 1:
-                        wait_time = min(2 ** attempt, 8)  # Exponential backoff, capped at 8 seconds
+                        #wait_time = min(2 ** attempt, 8)  # Exponential backoff, capped at 8 seconds
+                        wait_time = 1  # linear .. we don't want to wait forever
                         if has_console:
                             print(f"⚠️ Connection attempt {attempt + 1}/{max_retries} failed: {e}")
                             print(f"🔄 Retrying in {wait_time}s...")
@@ -713,6 +717,16 @@ class BLEClient:
         else:
             if has_console:
                 print(f"🔁 Verbindung zu {self.mac} besteht bereits")
+
+        if has_console:
+            print("🔍 Waiting for service discovery...")
+    
+        services_resolved = await self._wait_for_services_resolved(timeout=10.0)
+        if not services_resolved:
+            raise ConnectionError("Services not resolved within 10 seconds")
+
+        if has_console:
+            print("✅ All services discovered and resolved")
     
         await self._find_characteristics()
     
@@ -722,17 +736,17 @@ class BLEClient:
         self.read_props_iface = self.read_char_obj.get_interface(PROPERTIES_INTERFACE)
     
         # Verify services are resolved
-        try:
-            services_resolved = (await self.props_iface.call_get(DEVICE_INTERFACE, "ServicesResolved")).value
-            if not services_resolved:
-                # Wait a bit for services to resolve
-                await asyncio.sleep(2)
-                services_resolved = (await self.props_iface.call_get(DEVICE_INTERFACE, "ServicesResolved")).value
-                if not services_resolved:
-                    raise ConnectionError("Services not resolved after connection")
-        except DBusError as e:
-            if has_console:
-                print(f"⚠️ Warning: Could not check ServicesResolved: {e}")
+        #try:
+        #    services_resolved = (await self.props_iface.call_get(DEVICE_INTERFACE, "ServicesResolved")).value
+        #    if not services_resolved:
+        #        # Wait a bit for services to resolve
+        #        await asyncio.sleep(2)
+        #        services_resolved = (await self.props_iface.call_get(DEVICE_INTERFACE, "ServicesResolved")).value
+        #        if not services_resolved:
+        #            raise ConnectionError("Services not resolved after connection")
+        #except DBusError as e:
+        #    if has_console:
+        #        print(f"⚠️ Warning: Could not check ServicesResolved: {e}")
     
         self._connected = True
         await self._publish_status('connect BLE result', 'ok', "connection established, downloading config ..")
@@ -747,6 +761,29 @@ class BLEClient:
             print("▶️  Starting keep alive ..")
         if not self._keepalive_task or self._keepalive_task.done():
             self._keepalive_task = asyncio.create_task(self._send_keepalive())
+
+    async def _wait_for_services_resolved(self, timeout=10.0):
+        """Wait for BLE services to be discovered and resolved"""
+        start_time = time.time()
+        
+        while (time.time() - start_time) < timeout:
+            try:
+                services_resolved = (await self.props_iface.call_get(DEVICE_INTERFACE, "ServicesResolved")).value
+                if services_resolved:
+                    if has_console:
+                        print(f"🔍 Services resolved after {time.time() - start_time:.1f}s")
+                    return True
+                    
+                # Still waiting - check every 500ms
+                await asyncio.sleep(0.5)
+                
+            except DBusError as e:
+                if has_console:
+                    print(f"⚠️ Error checking ServicesResolved: {e}")
+                await asyncio.sleep(0.5)
+        
+        return False
+
     
     async def _cleanup_failed_connection(self):
         """Clean up after a failed connection attempt"""
@@ -882,11 +919,21 @@ class BLEClient:
             print(f"⚠️ StartNotify fehlgeschlagen: {e}")
 
     async def _on_props_changed(self, iface, changed, invalidated):
+      connection_state = "unknown"
+      try:
+           if self.props_iface:
+                 connected = (await self.props_iface.call_get(DEVICE_INTERFACE, "Connected")).value
+                 connection_state = "connected" if connected else "disconnected"
+      except:
+             connection_state = "error_checking"
+
+
       if iface != GATT_CHARACTERISTIC_INTERFACE:
         return
 
       if "Value" in changed:
         new_value = changed["Value"].value
+        
         await notification_handler(new_value, message_router=self.message_router)
 
         if self._on_value_change_cb:
@@ -902,8 +949,19 @@ class BLEClient:
            print("🛑 no read interface, can't stop notify ..")
            await self._publish_status('notify','error', f"❌ no read interface, can't stop notify")
            return
+
         try:
+           if self.read_props_iface:
+               try:
+                   # Try to remove the callback handler
+                   self.read_props_iface.off_properties_changed(self._on_props_changed)
+               except AttributeError:
+                   pass
+               except Exception as e:
+                   pass
+
            await self.read_char_iface.call_stop_notify()
+
            print("🛑 Notify gestoppt")
            await self._publish_status('disconnect','info', "unsubscribe from messages ..")
 
@@ -1083,14 +1141,21 @@ class BLEClient:
                self._keepalive_task = None
 
             await self.stop_notify()
-            await self.dev_iface.call_disconnect()
+
+            try:
+                await asyncio.wait_for(self.dev_iface.call_disconnect(), timeout=3.0)
+            except (asyncio.TimeoutError, Exception):
+                pass
+        
             await self._publish_status('disconnect','ok', "✅ disconnected")
             print(f"🧹 Disconnected von {self.mac}")
+
 
         except DBusError as e:
             await self._publish_status('disconnect','error', f"❌ disconnect error {e}")
             if has_console:
                print(f"⚠️ Disconnect fehlgeschlagen: {e}")
+
 
     async def close(self):
         if self._time_sync is not None:
@@ -1098,9 +1163,20 @@ class BLEClient:
             self._time_sync = None
 
         if self.bus:
-            self.bus.disconnect()
+            await asyncio.sleep(1.0)
+
+            try:
+                 self.bus.disconnect()
+            except Exception as e:
+                 pass
+
+        else:
+           return
+
         self.bus = None
         self._connected = False
+
+
 
     async def _handle_timesync(self, lat, lon):
         """Time sync handler that uses BLE client methods instead of global functions"""

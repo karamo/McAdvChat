@@ -5,7 +5,7 @@ import time
 import websockets
 import sys
 
-VERSION="v0.38.0"
+VERSION="v0.46.0"
 
 has_console = sys.stdout.isatty()
 
@@ -39,11 +39,11 @@ class WebSocketManager:
                 json_message = json.dumps(data)
                 await websocket.send(json_message)
                 if has_console:
-                  print(f"📡 WebSocketManager: Direct send to client successful")
+                  print(f"📡 WSMgr: Direct send to client successful")
             except Exception as e:
-                print(f"📡 WebSocketManager: Direct send failed: {e}")
+                print(f"📡 WSMgr: Direct send failed: {e}")
         else:
-            print(f"📡 WebSocketManager: Invalid direct send data: {message_data}")
+            print(f"📡 WSMgr: Invalid direct send data: {message_data}")
 
     async def _broadcast_handler(self, routed_message):
         """Handle messages from the router and broadcast to WebSocket clients"""
@@ -51,10 +51,10 @@ class WebSocketManager:
         message_data = routed_message['data']
         await self.broadcast_message(message_data)
         
-        truncated_data = str(message_data)[:80] + (".." if len(str(message_data)) > 80 else "")
+        truncated_data = str(message_data)[:120] + (".." if len(str(message_data)) > 120 else "")
 
         if has_console:
-          print(f"📡 WebSocketManager: Broadcasted {routed_message['type']} from {routed_message['source']}: {truncated_data}")
+          print(f"📡 WSMgr: BrdCast {routed_message['type']} frm {routed_message['source']}: {truncated_data}")
             
     async def broadcast_message(self, message):
         """Broadcast message to all connected WebSocket clients"""
@@ -68,12 +68,12 @@ class WebSocketManager:
             
             # Count successful sends
             successful = sum(1 for r in results if not isinstance(r, Exception))
-            #print(f"📡 WebSocketManager: Sent to {successful}/{len(targets)} clients")
+            #print(f"📡 WSMgr: Sent to {successful}/{len(targets)} clients")
         
     async def start_server(self):
         """Start the WebSocket server"""
         self.server = await websockets.serve(self._handle_connection, self.host, self.port)
-        print(f"📡 WebSocketManager: Server started on {self.host}:{self.port}")
+        print(f"📡 WSMgr: Server started on {self.host}:{self.port}")
         
     async def stop_server(self):
         """Stop the WebSocket server and disconnect all clients"""
@@ -90,13 +90,13 @@ class WebSocketManager:
             except:
                 pass
                 
-        print("📡 WebSocketManager: Server stopped")
+        print("📡 WSMgr: Server stopped")
         
     async def _handle_connection(self, websocket):
         """Handle individual WebSocket client connections"""
         peer = websocket.remote_address[0] if websocket.remote_address else "unknown"
         if has_console:
-           print(f"📡 WebSocketManager: Client connected from {peer}")
+           print(f"📡 WSMgr: Client connected from {peer}")
         
         async with self.clients_lock:
             self.clients.add(websocket)
@@ -106,19 +106,19 @@ class WebSocketManager:
                 try:
                     data = json.loads(message)
                     if has_console:
-                      print(f"📡 WebSocketManager: Received from {peer}: {data}")
+                      print(f"📡 WSMgr: Received from {peer}: {data}")
                         
                     await self._process_client_message(data, websocket, peer)
                     
                 except json.JSONDecodeError:
-                    print(f"📡 WebSocketManager: Invalid JSON from {peer}: {message}")
+                    print(f"📡 WSMgr: Invalid JSON from {peer}: {message}")
                     
         except websockets.exceptions.ConnectionClosed as e:
-            print(f"📡 WebSocketManager: {peer} disconnected: {e.code} - {e.reason}")
+            print(f"📡 WSMgr: {peer} disconnected: {e.code} - {e.reason}")
         except Exception as e:
-            print(f"📡 WebSocketManager: Error with {peer}: {e}")
+            print(f"📡 WSMgr: Error with {peer}: {e}")
         finally:
-            print(f"📡 WebSocketManager: Cleaning up connection from {peer}")
+            print(f"📡 WSMgr: Cleaning up connection from {peer}")
             async with self.clients_lock:
                 self.clients.discard(websocket)
                 

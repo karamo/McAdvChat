@@ -10,7 +10,7 @@ from datetime import datetime
 from collections import defaultdict, deque
 from meteo import WeatherService
 
-VERSION="v0.45.0"
+VERSION="v0.46.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -252,17 +252,14 @@ class CommandHandler:
     async def _message_handler(self, routed_message):
         """Handle incoming messages and check for commands"""
         message_data = routed_message['data']
+
         src_type = message_data.get('src_type')
 
         if 'msg' not in message_data:
-            if has_console:
-                print(f"🐛 CommandHandler: No 'msg' field, skipping")
             return
 
         msg_text = message_data.get('msg', '')
         if not msg_text or not msg_text.startswith('!'):
-            #if has_console:
-            #    print(f"🐛 CommandHandler: Not a command message: '{msg_text}', skipping")
             return
 
         # Filter for messages directed to us
@@ -312,9 +309,18 @@ class CommandHandler:
         # Check if message contains a command
         if not msg_text.startswith('!'):
             return
+
+        # ERWEITERTE FILTER LOGIK für !wx DK5EN .. damit nicht all losquaken
+        # 1. Direkte Commands an uns: dst = my_callsign
+        # 2. Gruppen-Commands: dst = numerische Gruppe UND message erwähnt uns
+        is_direct_command = (dst == self.my_callsign)
+        is_group_command = (dst and dst.isdigit() and self.my_callsign in msg_text)
+    
+        if not (is_direct_command or is_group_command):
+            return  # Nicht für uns bestimmt
             
         if has_console:
-            print(f"📋 CommandHandler: Processing command '{msg_text}' from {src}")
+            print(f"📋 CommandHandler: Processing command '{msg_text}' from {src} to {dst}")
 
         if self._is_user_blocked(src):
             if has_console:
@@ -336,10 +342,10 @@ class CommandHandler:
                 print(f"🔄 CommandHandler: Duplicate msg_id {msg_id}, src_type {src_type}, ignoring silently")
             return
 
-        content_hash = self._get_content_hash(src, msg_text)
+        content_hash = self._get_content_hash(src, msg_text, dst)
         if self._is_throttled(content_hash):
             if has_console:
-                print(f"⏳ CommandHandler: THROTTLED - {src} command '{msg_text}' (hash: {content_hash})")
+                print(f"⏳ CommandHandler: THROTTLED - {src} command '{msg_text}' in group {dst} (hash: {content_hash})")
             await self.send_response("⏳ Command throttled. Same command allowed once per 5min", src, src_type)
             return
 
@@ -350,7 +356,7 @@ class CommandHandler:
             if cmd_result:
                 cmd, kwargs = cmd_result
                 
-                content_hash = self._get_content_hash(src, msg_text)
+                content_hash = self._get_content_hash(src, msg_text, dst)
                 if self._is_throttled(content_hash, cmd):
                     if has_console:
                         timeout = COMMAND_THROTTLING.get(cmd, DEFAULT_THROTTLE_TIMEOUT)
@@ -361,7 +367,6 @@ class CommandHandler:
                     else:
                         timeout_text = "10min"
                         
-                    #await self.send_response(f"⏳ !{cmd} throttled. Try again in {timeout_text}", src, src_type)
                     await self.send_response(f"⏳ !{cmd} throttled. Try again in {timeout_text}", response_target, src_type)
                     return
 
@@ -409,7 +414,7 @@ class CommandHandler:
                 await self.send_response(f"❌ Command failed: {str(e)[:50]}", response_target, src_type)
 
 
-    def _get_content_hash(self, src, msg_text):
+    def _get_content_hash(self, src, msg_text, dst=None):
         """Create hash from source + command (without arguments for command-specific throttling)"""
         # Extract command for specific throttling
         if msg_text.startswith('!'):
@@ -418,9 +423,15 @@ class CommandHandler:
                 command = parts[0].lower()
                 # For commands with specific throttling, use command-only hash
                 if command in COMMAND_THROTTLING:
-                    content = f"{src}:!{command}"
+                    if dst:
+                        content = f"{src}:{dst}:!{command}"
+                    else:
+                        content = f"{src}:!{command}"
                 else:
-                    content = f"{src}:{msg_text}"  # Full command + args for others
+                    if dst:
+                        content = f"{src}:{dst}:{msg_text}" 
+                    else:
+                        content = f"{src}:{msg_text}"  # Full command + args for others
             else:
                 content = f"{src}:{msg_text}"
         else:
@@ -926,118 +937,6 @@ class CommandHandler:
             return line1 + " " * padding_needed + ", " + lines[1]
 
 
-
-
-
-    async def handle_mheard_newer(self, kwargs, requester):
-        """Show recently heard stations from both messages and positions with optional type filtering"""
-        limit = int(kwargs.get('limit', 5))
-        msg_type = kwargs.get('type', 'all').lower()  # 'msg', 'pos', 'all'
-        
-        if not self.storage_handler:
-            return "❌ Message storage not available"
-            
-        # Track both message and position activity
-        stations = defaultdict(lambda: {
-            'last_msg': 0, 'msg_count': 0,
-            'last_pos': 0, 'pos_count': 0,
-            'last_activity': 0
-        })
-        
-        for item in list(self.storage_handler.message_store)[-4000:]:
-            try:
-                raw_data = json.loads(item["raw"])
-                src = raw_data.get('src', '')
-                timestamp = raw_data.get('timestamp', 0)
-                data_type = raw_data.get('type', '')
-    
-                if data_type not in ['msg', 'pos'] or not src:
-                    continue
-                    
-                call = src.split(',')[0]
-                
-                if data_type == 'msg':
-                    stations[call]['msg_count'] += 1
-                    if timestamp > stations[call]['last_msg']:
-                        stations[call]['last_msg'] = timestamp
-                elif data_type == 'pos':
-                    stations[call]['pos_count'] += 1
-                    if timestamp > stations[call]['last_pos']:
-                        stations[call]['last_pos'] = timestamp
-                
-                # Track overall last activity
-                if timestamp > stations[call]['last_activity']:
-                    stations[call]['last_activity'] = timestamp
-                    
-            except (json.JSONDecodeError, KeyError):
-                continue
-        
-        # Separate stations by activity type
-        msg_stations = []
-        pos_stations = []
-        
-        # Sort all stations by last activity first
-        sorted_stations = sorted(
-            stations.items(), 
-            key=lambda x: x[1]['last_activity'], 
-            reverse=True
-        )
-        
-        # Build separate lists for msg and pos based on their respective last activity
-        for call, data in sorted_stations:
-            if data['msg_count'] > 0:
-                msg_stations.append((call, data, data['last_msg']))
-            if data['pos_count'] > 0:
-                pos_stations.append((call, data, data['last_pos']))
-        
-        # Sort each list by their specific activity type and limit
-        msg_stations.sort(key=lambda x: x[2], reverse=True)
-        pos_stations.sort(key=lambda x: x[2], reverse=True)
-        
-        msg_stations = msg_stations[:limit]
-        pos_stations = pos_stations[:limit]
-        
-        # Build response parts based on type parameter
-        response_parts = []
-        
-        if msg_type in ['all', 'msg'] and msg_stations:
-            msg_entries = []
-            for call, data, last_time in msg_stations:
-                time_str = time.strftime('%H:%M', time.localtime(last_time/1000))
-                msg_entries.append(f"{call} @{time_str} ({data['msg_count']})")
-            
-            msg_line = "📻 MH: 💬 " + " | ".join(msg_entries)
-            response_parts.append(msg_line)
-            
-        if msg_type in ['all', 'pos'] and pos_stations:
-            pos_entries = []
-            for call, data, last_time in pos_stations:
-                time_str = time.strftime('%H:%M', time.localtime(last_time/1000))
-                pos_entries.append(f"{call} @{time_str} ({data['pos_count']})")
-            
-            pos_line = "      📍 " + " | ".join(pos_entries)
-            response_parts.append(pos_line)
-        
-        # Handle response building with chunking strategy
-        if not response_parts:
-            return "📻 No activity found"
-        
-        if len(response_parts) == 1:
-            # Single line response (either msg-only or pos-only)
-            return response_parts[0]
-        
-        if len(response_parts) == 2:
-            # Two-line response (msg + pos) - use padding strategy
-            line1 = response_parts[0]
-            line2 = response_parts[1]
-            
-            # Pad first line to force clean chunk boundary
-            padded_line1 = self._pad_for_chunk_break(line1)
-            return padded_line1 + line2
-        
-        return response_parts[0]  # Fallback
-    
-    #def _pad_for_chunk_break(self, text, target_length=138):
     def _pad_for_chunk_break(self, text, target_length=MAX_RESPONSE_LENGTH-2):
         """Pad text to force clean chunk boundary using byte-aware calculation"""
         text_bytes = text.encode('utf-8')
@@ -1058,132 +957,6 @@ class CommandHandler:
         
         return padded_text
 
-
-    async def handle_mheard_old(self, kwargs, requester):
-        """Show recently heard stations"""
-        limit = int(kwargs.get('limit', 5))
-        
-        if not self.storage_handler:
-            return "❌ Message storage not available"
-            
-        # Get recent station activity
-        stations = defaultdict(lambda: {'last_seen': 0, 'msg_count': 0})
-        
-        for item in list(self.storage_handler.message_store)[-4000:]:  # Last 4000 messages
-            try:
-                raw_data = json.loads(item["raw"])
-                src = raw_data.get('src', '')
-                timestamp = raw_data.get('timestamp', 0)
-                msg_type = raw_data.get('type', '')
-
-                if msg_type != 'msg':
-                   continue
-                
-                if not src:
-                    continue
-                    
-                # Use first callsign in path
-                call = src.split(',')[0]
-                if timestamp > stations[call]['last_seen']:
-                    stations[call]['last_seen'] = timestamp
-                stations[call]['msg_count'] += 1
-                
-            except (json.JSONDecodeError, KeyError):
-                continue
-                
-        # Sort by last seen time
-        sorted_stations = sorted(
-            stations.items(), 
-            key=lambda x: x[1]['last_seen'], 
-            reverse=True
-        )[:limit]
-        
-        if not sorted_stations:
-            return "📻 No stations heard recently"
-            
-        response = "📻 MH: "
-        station_info = []
-
-        for call, data in sorted_stations:
-            last_time = time.strftime('%H:%M', time.localtime(data['last_seen']/1000))
-            #response += f"{call} @{last_time} ({data['msg_count']})\n"
-            station_info.append(f"{call} @{last_time} ({data['msg_count']})")
-            
-        response += ", ".join(station_info)
-        return response.rstrip()
-
-    async def handle_position(self, kwargs, requester):
-        """Show position data for callsign"""
-        call = kwargs.get('call', '').upper()
-        
-        if not call:
-            return "❌ Callsign required. Use: !pos call:CALL"
-            
-        if not self.storage_handler:
-            return "❌ Message storage not available"
-            
-        for item in reversed(list(self.storage_handler.message_store)):
-            try:
-                raw_data = json.loads(item["raw"])
-                
-                if raw_data.get('type') != 'pos':
-                    continue
-                    
-                src = raw_data.get('src', '')
-                if call not in src.upper():
-                    continue
-                    
-                lat = raw_data.get('lat')
-                lon = raw_data.get('long')
-                alt_ft = raw_data.get('alt')
-                rssi = raw_data.get('rssi')
-                snr = raw_data.get('snr')
-                firmware = raw_data.get('firmware', '')
-                fw_sub = raw_data.get('fw_sub', '')
-                lora_mod = raw_data.get('lora_mod')
-                hw_id = raw_data.get('hw_id')
-                
-                if lat is not None and lon is not None:
-                    lat_str = f"{lat:.2f}"
-                    lon_str = f"{lon:.2f}"
-                    mhloc = self._decode_maidenhead(lat, lon)
-
-                    response = f"📍 {call}: {lat_str}, {lon_str}, {mhloc}"
-
-                    if alt_ft:
-                       alt_m = int(alt_ft * 0.3048)  # 1 ft = 0.3048 m
-                       response += f" / {alt_m}m"
-                
-                    # Add RSSI if available
-                    if rssi is not None:
-                        response += f" / RSSI {rssi}"
-                
-                    # Add SNR if available  
-                    if snr is not None:
-                        response += f" / SNR {snr}"
-                
-                    # Add firmware and subversion, if available
-                    if firmware:
-                        response += f" / FW: {firmware}"
-                    if fw_sub:
-                        response += f"{fw_sub}"
-                
-                    # Add modulation info
-                    if lora_mod is not None:
-                        mod_text = self._decode_lora_modulation(lora_mod)
-                        response += f" / Mod: {mod_text}"
-                
-                    # Add hardware info
-                    if hw_id is not None:
-                        hw_text = self._decode_hardware_id(hw_id)
-                        response += f" / {hw_text}"
-
-                    return response
-
-            except (json.JSONDecodeError, KeyError):
-                continue
-                
-        return f"📍 No position data for {call}"
 
     def _decode_lora_modulation(self, lora_mod):
       """Decode LoRa modulation value to readable format"""
@@ -1298,7 +1071,8 @@ class CommandHandler:
                   }
               
                   # Route to appropriate protocol (BLE or UDP)
-                  print("command handler: src_type",src_type)
+                  if has_console:
+                     print("command handler: src_type",src_type)
 
                   try:
                         if src_type=="ble":

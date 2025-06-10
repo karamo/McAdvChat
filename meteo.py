@@ -14,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, Any, List
 import time
 
-VERSION="v0.45.0"
+VERSION="v0.46.0"
 
 # Logging Setup
 logging.basicConfig(
@@ -25,6 +25,9 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger('weather_service')
+
+has_console = sys.stdout.isatty()
+
 
 class WeatherServiceError(Exception):
     """Custom Exception für Wetter-Service Fehler"""
@@ -54,12 +57,12 @@ class WeatherService:
         """
         Hybrid-Methode: DWD primär, OpenMeteo für fehlende Parameter
         """
-        logger.info("Starte Hybrid-Wetterabfrage...")
+        logger.debug("Starte Hybrid-Wetterabfrage...")
         
         # 1. Versuche DWD BrightSky zu laden
         dwd_data = None
         try:
-            logger.info("📡 Lade DWD BrightSky Daten...")
+            logger.debug("📡 Lade DWD BrightSky Daten...")
             dwd_data = self._get_brightsky_weather()
             
             # Zeitvalidierung für DWD
@@ -70,13 +73,13 @@ class WeatherService:
                     logger.warning("❌ DWD liefert None für Kernparameter → Fallback auf OpenMeteo")
                     dwd_data = None  # DWD verwerfen
                 else:
-                    logger.info(f"✅ DWD-Daten verfügbar und aktuell ({age_check['age_minutes']:.1f} Min alt)")
+                    logger.debug(f"✅ DWD-Daten verfügbar und aktuell ({age_check['age_minutes']:.1f} Min alt)")
 
             elif not self._has_valid_core_data(dwd_data):
-                logger.warning("⚠️  DWD liefert None-Werte → Fallback auf OpenMeteo")
+                logger.debug("⚠️  DWD liefert None-Werte → Fallback auf OpenMeteo")
                 dwd_data = None
             else:
-                logger.warning(f"⚠️  DWD-Daten zu alt: {age_check['reason']}")
+                logger.debug(f"⚠️  DWD-Daten zu alt: {age_check['reason']}")
                 dwd_data = None  # Verwerfe alte DWD-Daten
                 
         except Exception as e:
@@ -86,9 +89,9 @@ class WeatherService:
         # 2. Lade OpenMeteo Daten (immer als Backup/Ergänzung)
         openmeteo_data = None
         try:
-            logger.info("📡 Lade OpenMeteo Daten...")
+            logger.debug("📡 Lade OpenMeteo Daten...")
             openmeteo_data = self._get_openmeteo_weather()
-            logger.info("✅ OpenMeteo-Daten verfügbar")
+            logger.debug("✅ OpenMeteo-Daten verfügbar")
         except Exception as e:
             logger.warning(f"❌ OpenMeteo nicht verfügbar: {e}")
             openmeteo_data = None
@@ -103,19 +106,19 @@ class WeatherService:
             }
         elif dwd_data is None:
             # Nur OpenMeteo verfügbar
-            logger.info("🔄 Nutze ausschließlich OpenMeteo")
+            logger.debug("🔄 Nutze ausschließlich OpenMeteo")
             openmeteo_data["data_source"] = "OpenMeteo (Fallback)"
             openmeteo_data["timestamp"] = datetime.now(timezone.utc).isoformat()
             return openmeteo_data
         elif openmeteo_data is None:
             # Nur DWD verfügbar
-            logger.info("🔄 Nutze ausschließlich DWD (OpenMeteo nicht verfügbar)")
+            logger.debug("🔄 Nutze ausschließlich DWD (OpenMeteo nicht verfügbar)")
             dwd_data["data_source"] = "DWD_BrightSky (ohne Ergänzung)"
             dwd_data["timestamp"] = datetime.now(timezone.utc).isoformat()
             return dwd_data
         else:
             # Beide verfügbar - FUSION!
-            logger.info("🔄 Führe Daten-Fusion durch: DWD primär + OpenMeteo Ergänzung")
+            logger.debug("🔄 Führe Daten-Fusion durch: DWD primär + OpenMeteo Ergänzung")
             fused_data = self._fuse_weather_data(dwd_data, openmeteo_data)
             fused_data["timestamp"] = datetime.now(timezone.utc).isoformat()
             return fused_data
@@ -142,10 +145,10 @@ class WeatherService:
                 logger.debug(f"✅ DWD {param_name}: {value}")
         
         if invalid_params:
-            logger.warning(f"❌ DWD liefert None für kritische Parameter: {', '.join(invalid_params)}")
+            logger.debug(f"❌ DWD liefert None für kritische Parameter: {', '.join(invalid_params)}")
             return False
         
-        logger.info("✅ DWD Kernparameter sind gültig")
+        logger.debug("✅ DWD Kernparameter sind gültig")
         return True
     
 
@@ -154,7 +157,7 @@ class WeatherService:
         """
         Intelligente Daten-Fusion: DWD hat Priorität, OpenMeteo ergänzt fehlende Werte
         """
-        logger.info("🧩 Starte intelligente Daten-Fusion...")
+        logger.debug("🧩 Starte intelligente Daten-Fusion...")
         
         # Basis: DWD-Daten kopieren
         fused = dwd_data.copy()
@@ -180,7 +183,7 @@ class WeatherService:
                 # DWD hat keinen Wert, OpenMeteo ergänzt
                 fused[param] = openmeteo_value
                 supplemented_params.append(param_name)
-                logger.info(f"  ➕ {param_name}: {openmeteo_value} (von OpenMeteo ergänzt)")
+                logger.debug(f"  ➕ {param_name}: {openmeteo_value} (von OpenMeteo ergänzt)")
             elif dwd_value is not None:
                 # DWD-Wert behalten
                 kept_dwd_params.append(f"{param_name}: {dwd_value}")
@@ -192,10 +195,10 @@ class WeatherService:
         # Datenquellen-Info zusammenstellen
         if supplemented_params:
             source_info = f"DWD_BrightSky + OpenMeteo ({', '.join(supplemented_params)})"
-            logger.info(f"✅ Fusion abgeschlossen: {len(supplemented_params)} Parameter von OpenMeteo ergänzt")
+            logger.debug(f"✅ Fusion abgeschlossen: {len(supplemented_params)} Parameter von OpenMeteo ergänzt")
         else:
             source_info = "DWD_BrightSky (vollständig)"
-            logger.info("✅ Fusion abgeschlossen: DWD-Daten waren vollständig")
+            logger.debug("✅ Fusion abgeschlossen: DWD-Daten waren vollständig")
         
         fused["data_source"] = source_info
         fused["supplemented_parameters"] = supplemented_params
@@ -417,7 +420,8 @@ class WeatherService:
         response = self._make_request(url, params)
         data = response.json()
 
-        print("openmeteo debug:",data)
+        if has_console:
+            print("openmeteo debug:",data)
         
         if "current" not in data:
             raise WeatherServiceError("Keine aktuellen Open-Meteo-Daten verfügbar")
@@ -499,13 +503,13 @@ class WeatherService:
 
         if temp is None:
             temp = 0.0
-            logger.warning("⚠️  Temperatur None → 0.0")
+            logger.debug("⚠️  Temperatur None → 0.0")
         if humid is None:
             humid = 0
-            logger.warning("⚠️  Luftfeuchtigkeit None → 0")
+            logger.debug("⚠️  Luftfeuchtigkeit None → 0")
         if press is None:
             press = 0.0
-            logger.warning("⚠️  Luftdruck None → 0.0" )
+            logger.debug("⚠️  Luftdruck None → 0.0" )
         
         # Wind
         wind_speed = weather_data.get("windgeschwindigkeit_kmh", 0) or 0
