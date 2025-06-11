@@ -89,7 +89,8 @@ if [ ! -f "$CONFIG_DIR/$CONFIG_FILE" ]; then
   "CALL_SIGN": "DK0XXX",
   "LAT":48.4031,
   "LONG": 11.7497,
-  "STAT_NAME": "Freising"
+  "STAT_NAME": "Freising",
+  "USER_INFO_TEXT": "DK0XX-99 Node | Location: City, Country | Operator: Name | QRV: 70cm/2m/HF | QRZ.COM DK0XX"
 }
 EOF
   echo "now:    sudo vi $CONFIG_DIR/$CONFIG_FILE"
@@ -136,6 +137,12 @@ fi
 if ! jq -e '.STAT_NAME' /etc/mcadvchat/config.json > /dev/null 2>&1; then
   echo "Adding a config parameter for your Station, to enable weather reports"
   sudo jq '.STAT_NAME = "Freising" ' /etc/mcadvchat/config.json > /tmp/config.tmp && \
+  sudo mv /tmp/config.tmp /etc/mcadvchat/config.json
+fi
+
+if ! jq -e '.USER_INFO_TEXT' /etc/mcadvchat/config.json > /dev/null 2>&1; then
+  echo "Adding a config parameter for your Station, to enable weather reports"
+  sudo jq '.USER_INFO_TEXT = "DK0XX-99 Node | Location: City, Country | Operator: Name | QRV: 70cm/2m/HF | QRZ.COM DK0XX" ' /etc/mcadvchat/config.json > /tmp/config.tmp && \
   sudo mv /tmp/config.tmp /etc/mcadvchat/config.json
 fi
 

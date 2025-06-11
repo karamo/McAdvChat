@@ -11,7 +11,7 @@ from ble_handler import (
 
 from command_handler import create_command_handler
 
-VERSION="v0.47.0"
+VERSION="v0.48.0"
 
 import asyncio
 import errno
@@ -58,6 +58,7 @@ class MessageRouter:
         self.storage_handler = message_storage_handler
         self.logger = print
         self.my_callsign = None
+        self.validator = None
 
         if message_storage_handler:
             self.subscribe('mesh_message', self._storage_handler)
@@ -69,117 +70,100 @@ class MessageRouter:
     def set_callsign(self, callsign):
         """Set the callsign from config"""
         self.my_callsign = callsign.upper()
-
-    async def _udp_message_handler(self, routed_message):
-        """Handle UDP messages from WebSocket and route to UDP handler"""
-        message_data = routed_message['data']
-
-        if not message_data.get('src') and self.my_callsign:
-            message_data['src'] = self.my_callsign
-
+        self.validator = MessageValidator(self.my_callsign)
         if has_console:
-            print(f"📡 UDP Message Handler: Processing message to {message_data.get('dst')}")
+            print(f"🔧 MessageRouter: Callsign set to '{self.my_callsign}', validator initialized")
 
 
-        # NEW: Check if this is own group command that should be suppressed
-        if self._should_suppress_outbound(message_data):
-            # Route to CommandHandler but don't send to mesh
-            if has_console:
-                print(f"📡 UDP Message Handler: Route to CommandHandler but don't send to mesh")
-            synthetic_message = self._create_synthetic_message(message_data, 'udp')
-            await self._route_to_command_handler(synthetic_message)
-            return
-    
-        # Check if this is a self-message first
-        is_self_message = await self._handle_outgoing_message(message_data, 'udp')
-    
-        if is_self_message:
-            if has_console:
-                print(f"📡 UDP Message Handler: Self-message handled, not sending to mesh")
-            return
-
-    
-        # External message - send to mesh network
+    def test_suppression_logic(self):
+        """Test suppression logic based on the table scenarios"""
         if has_console:
-            print(f"📡 UDP Message Handler: Sending external message to mesh network")
+            print("\n🧪 Testing Suppression Logic:")
+            print("=" * 50)
+        
+        test_cases = [
+            # (src, dst, msg, expected_suppression, description)
+            (self.my_callsign, "20", "!WX", True, "Group ohne Target → lokal"),
+            (self.my_callsign, "20", "!WX OE5HWN-12", False, "Group mit anderem Target → senden"),
+            (self.my_callsign, "20", f"!WX {self.my_callsign}", True, "Group mit meinem Target → lokal"),
+            (self.my_callsign, "TEST", "!WX", True, "Test-Gruppe ohne Target → lokal"),
+            (self.my_callsign, "TEST", "!WX OE5HWN-12", False, "Test-Gruppe mit anderem Target → senden"),
+            (self.my_callsign, "OE5HWN-12", "!TIME", True, "Persönlich ohne Target → lokal"),
+            (self.my_callsign, "OE5HWN-12", "!TIME OE5HWN-12", False, "Persönlich mit Target (gleich dst) → senden"),
+            (self.my_callsign, "OE5HWN-12", f"!TIME {self.my_callsign}", True, "Persönlich mit Target (ich) → lokal"),
+            (self.my_callsign, "*", "!WX", True, "Ungültiges Ziel → suppress"),
+            (self.my_callsign, "ALL", "!WX", True, "Ungültiges Ziel → suppress"),
+            ("OE5HWN-12", "20", "!WX", False, "Nicht unsere Message → nicht suppessen"),
+        ]
+        
+        results = []
+        for src, dst, msg, expected, description in test_cases:
+            test_data = {'src': src, 'dst': dst, 'msg': msg}
+            normalized = self.validator.normalize_message_data(test_data)
+            actual = self.validator.should_suppress_outbound(normalized)
             
-        # Get the UDP protocol handler
-        udp_handler = self.get_protocol('udp')
+            status = "✅ PASS" if actual == expected else "❌ FAIL"
+            reason = self.validator.get_suppression_reason(normalized)
+            
+            results.append((status, description, actual, expected, reason))
+            
+            if has_console:
+                print(f"{status} | {description}")
+                print(f"     {src}→{dst} '{msg}' → {actual} (expected: {expected})")
+                print(f"     Reason: {reason}")
+                print()
         
-        if udp_handler:
-            try:
-                await udp_handler.send_message(message_data)
-                if has_console:
-                    print(f"📡 UDP message sent successfully to mesh network")
-            except Exception as e:
-                print(f"📡 UDP message send failed: {e}")
-                # Optionally publish error status
-                await self.publish('system', 'websocket_message', {
-                    'src_type': 'system',
-                    'type': 'error',
-                    'msg': f"Failed to send UDP message: {e}",
-                    'timestamp': int(time.time() * 1000)
-                })
-        else:
-            print(f"📡 UDP handler not available, can't send message")
-            await self.publish('system', 'websocket_message', {
-                'src_type': 'system',
-                'type': 'error', 
-                'msg': "UDP handler not available",
-                'timestamp': int(time.time() * 1000)
-            })
-
-    async def _ble_message_handler(self, routed_message):
-        """Handle BLE messages from WebSocket and route to BLE client"""
-        
-        message_data = routed_message['data']
-        msg = message_data.get('msg')
-        dst = message_data.get('dst')
-
-        # NORMALIZE: Add src field if missing (messages from our WebSocket)
-        if not message_data.get('src') and self.my_callsign:
-            message_data['src'] = self.my_callsign
+        # Summary
+        passed = sum(1 for r in results if r[0].startswith("✅"))
+        total = len(results)
         
         if has_console:
-            print(f"📱 BLE Message Handler: Processing message '{msg}' to '{dst}'")
+            print(f"🧪 Test Summary: {passed}/{total} tests passed")
+            if passed == total:
+                print("🎉 All suppression tests passed!")
+            else:
+                print("⚠️ Some tests failed - check logic!")
+            print("=" * 50)
+        
+        return passed == total
 
-        # NEW: Check if this is own group command that should be suppressed
-        if self._should_suppress_outbound(message_data):
-            # Route to CommandHandler but don't send to device
-            if has_console:
-                print(f"📱 BLE Message Handler: Route to CommandHandler but don't send to device")
-            synthetic_message = self._create_synthetic_message(message_data, 'ble')
-            await self._route_to_command_handler(synthetic_message)
-            return
 
-    
-        # Check if this is a self-message first
-        is_self_message = await self._handle_outgoing_message(message_data, 'ble')
-        
-        if is_self_message:
-            if has_console:
-                print(f"📱 BLE Message Handler: Self-message handled, not sending to device")
+
+    def log_message_routing_decision(self, message_data, decision_type, action, reason):
+        """Centralized logging for message routing decisions"""
+        if not has_console:
             return
+            
+        src = message_data.get('src', 'unknown')
+        dst = message_data.get('dst', 'unknown') 
+        msg = message_data.get('msg', '')[:20] + ('...' if len(message_data.get('msg', '')) > 20 else '')
         
-        # External message - send to BLE device
-        if has_console:
-            print(f"📱 BLE Message Handler: Sending external message to BLE device")
-        await handle_ble_message(msg, dst)
-        
+        print(f"🔄 {decision_type}: {src}→{dst} '{msg}' → {action} ({reason})")
+
 
 
     async def _storage_handler(self, routed_message):
         """Handle message storage for all routed messages"""
         if self.storage_handler:
             message_data = routed_message['data']
+
+            src = message_data.get('src', '').split(',')[0].upper()
+            if self._is_callsign_blocked(src):
+                if has_console:
+                    print(f"🚫 Blocked message from {src}")
+                return
+
             raw_json = json.dumps(message_data)
             await self.storage_handler.store_message(message_data, raw_json)
+
+    def _is_callsign_blocked(self, callsign):
+        """Check if callsign is blocked"""
+        # Get blocked list from CommandHandler
+        command_handler = self.get_protocol('commands')
+        if hasattr(command_handler, 'blocked_callsigns'):
+            return callsign in command_handler.blocked_callsigns
+        return False
             
-            #if has_console:
-            #    count = self.storage_handler.get_message_count()
-            #    size_mb = self.storage_handler.get_storage_size_mb()
-            #    print(f"📦 MessageStorage: {count} messages, {size_mb:.2f}MB")
-        
     def register_protocol(self, name: str, handler):
         """Register a protocol handler (UDP, BLE, WebSocket)"""
         self._protocols[name] = handler
@@ -201,9 +185,6 @@ class MessageRouter:
             'data': data,
             'timestamp': int(time.time() * 1000)
         }
-        
-        #if has_console:
-        #    print(f"MessageRouter: Publishing {message_type} from {source} to {len(self._subscribers[message_type])} subscribers")
         
         # Send to all subscribers of this message type
         for handler in self._subscribers[message_type]:
@@ -338,7 +319,6 @@ class MessageRouter:
         await self.publish('router', 'websocket_direct', {'websocket': websocket, 'data': payload})
 
 
-
     async def _handle_dump_to_fs_command(self):
         """Handle dump to filesystem command"""
         self.storage_handler.save_dump(store_file_name)
@@ -348,21 +328,6 @@ class MessageRouter:
     async def _handle_ble_scan_command(self):
         """Handle BLE scan command"""
         await scan_ble_devices(message_router=self)
-
-    #async def _handle_ble_info_command(self):
-    #    """Handle BLE info command"""
-    #    global client
-    #    if client is None:
-    #        await self.publish('ble', 'ble_status', {
-    #            'src_type': 'BLE',
-    #            'TYP': 'blueZ', 
-    #            'command': 'ble_info result',
-    #            'result': 'error',
-    #            'msg': "client not connected",
-    #            'timestamp': int(time.time() * 1000)
-    #        })
-    #        return
-    #    await client.ble_info()
 
     async def _handle_ble_pair_command(self, MAC, BLE_Pin):
         """Handle BLE pair command"""
@@ -393,51 +358,141 @@ class MessageRouter:
         """Handle device set commands (--settime, --setCALL, etc.)"""
         await handle_set_command(command)
 
-    def _is_message_to_self(self, message_data):
-        """Check if message is addressed to our own callsign"""
-        if not self.my_callsign:
-            return False
-        dst = message_data.get('dst', '').upper()
-        msg = message_data.get('msg', '')
-
-        return dst == self.my_callsign
-
-
     def _should_suppress_outbound(self, message_data):
-        """Check if outbound message should be suppressed (own group commands)"""
+        """Check if outbound message should be suppressed using validator"""
+        if not self.validator:
+            if has_console:
+                print(f"⚠️ Validator not initialized, no suppression")
+            return False
+        
+        suppress = self.validator.should_suppress_outbound(message_data)
+        
+        if has_console:
+            reason = self.validator.get_suppression_reason(message_data)
+            action = "SUPPRESS" if suppress else "FORWARD"
+            print(f"🔄 Suppression decision: {action} - {reason}")
+        
+        return suppress
+
+
+
+    async def _udp_message_handler(self, routed_message):
+        """Handle UDP messages from WebSocket and route to UDP handler"""
+        message_data = routed_message['data']
+    
+        # EARLY NORMALIZATION - ab hier alles uppercase
+        normalized_data = self.validator.normalize_message_data(message_data)
+        
+        # Add our callsign if missing
+        if not normalized_data.get('src') and self.my_callsign:
+            normalized_data['src'] = self.my_callsign
+    
+        if has_console:
+            print(f"📡 UDP Handler: Processing '{normalized_data.get('msg')}' from {normalized_data.get('src')} to {normalized_data.get('dst')}")
+    
+        if self._should_suppress_outbound(normalized_data):
+            reason = self.validator.get_suppression_reason(normalized_data)
+            self.log_message_routing_decision(normalized_data, "UDP_SUPPRESSION", "SUPPRESS", reason)
+            
+            synthetic_message = self._create_synthetic_message(normalized_data, 'udp')
+            await self._route_to_command_handler(synthetic_message)
+            return
+    
+        # Check if this is a self-message first
+        is_self_message = await self._handle_outgoing_message(normalized_data, 'udp')
+    
+        if is_self_message:
+            if has_console:
+                print(f"📡 UDP Handler: Self-message handled, not sending to mesh")
+            return
+    
+        # External message - send to mesh network
+        if has_console:
+            print(f"📡 UDP Handler: Sending external message to mesh network")
+            
+        udp_handler = self.get_protocol('udp')
+        
+        if udp_handler:
+            try:
+                await udp_handler.send_message(normalized_data)
+                if has_console:
+                    print(f"📡 UDP message sent successfully to mesh network")
+            except Exception as e:
+                print(f"📡 UDP message send failed: {e}")
+                await self.publish('system', 'websocket_message', {
+                    'src_type': 'system',
+                    'type': 'error',
+                    'msg': f"Failed to send UDP message: {e}",
+                    'timestamp': int(time.time() * 1000)
+                })
+        else:
+            print(f"📡 UDP handler not available, can't send message")
+            await self.publish('system', 'websocket_message', {
+                'src_type': 'system',
+                'type': 'error', 
+                'msg': "UDP handler not available",
+                'timestamp': int(time.time() * 1000)
+            })
+
+    
+    async def _ble_message_handler(self, routed_message):
+        """Handle BLE messages from WebSocket and route to BLE client"""
+        
+        message_data = routed_message['data']
+        
+        # EARLY NORMALIZATION - ab hier alles uppercase
+        normalized_data = self.validator.normalize_message_data(message_data)
+        
+        # Add our callsign if missing
+        if not normalized_data.get('src') and self.my_callsign:
+            normalized_data['src'] = self.my_callsign
+    
+        msg = normalized_data.get('msg')
+        dst = normalized_data.get('dst')
+        
+        if has_console:
+            print(f"📱 BLE Handler: Processing '{msg}' from {normalized_data.get('src')} to '{dst}'")
+    
+        if self._should_suppress_outbound(normalized_data):
+            reason = self.validator.get_suppression_reason(normalized_data)
+            self.log_message_routing_decision(normalized_data, "BLE_SUPPRESSION", "SUPPRESS", reason)
+            
+            synthetic_message = self._create_synthetic_message(normalized_data, 'ble')
+            await self._route_to_command_handler(synthetic_message)
+            return
+    
+        # Check if this is a self-message first
+        is_self_message = await self._handle_outgoing_message(normalized_data, 'ble')
+        
+        if is_self_message:
+            if has_console:
+                print(f"📱 BLE Handler: Self-message handled, not sending to device")
+            return
+        
+        # External message - send to BLE device
+        if has_console:
+            print(f"📱 BLE Handler: Sending external message to BLE device")
+        await handle_ble_message(msg, dst)
+    
+    def _is_message_to_self(self, message_data):
+        """Check if message is addressed to our own callsign (assumes normalized data)"""
         if not self.my_callsign:
             return False
-            
-        src = message_data.get('src', '')
         dst = message_data.get('dst', '')
-        msg = message_data.get('msg', '')
-        if has_console:
-             print(f"🔍 Suppress check: src='{src}', dst='{dst}', msg='{msg[:20]}...'")
-        
-        # Suppress own commands to groups
-        is_own_group_command = (
-            src == self.my_callsign and
-            dst and (dst.isdigit() or dst.upper() == 'TEST') and
-            msg.startswith('!')
-        )
-        
-        if not self.my_callsign:
-            print(f"🔍 Suppress result: {is_own_group_command}")
-
-        return is_own_group_command
-
+        return dst == self.my_callsign
+    
     def _create_synthetic_message(self, original_message, protocol_type='udp'):
-        """Create a synthetic message that looks like it came from LoRa"""
+        """Create a synthetic message that looks like it came from LoRa (uses normalized data)"""
         current_time = int(time.time())
-        msg_id = f"{current_time:08X}"  # Hex timestamp as msg_id
+        msg_id = f"{current_time:08X}"
     
         return {
-            'src': self.my_callsign,  # Use configured callsign as source
-            'dst': original_message.get('dst').upper(),
+            'src': original_message.get('src'),  # Already uppercase
+            'dst': original_message.get('dst'),  # Already uppercase  
             'msg': original_message.get('msg'),
             'msg_id': msg_id,
             'type': 'msg',
-            'src_type': protocol_type,  # Use the actual protocol type
+            'src_type': protocol_type,
             'timestamp': current_time * 1000
         }
 
@@ -473,7 +528,6 @@ class MessageRouter:
     
         # Find CommandHandler subscribers
         for handler in self._subscribers['ble_notification']:
-            #if 'CommandHandler' in str(type(handler)):
             try:
                   await handler(routed_message)
                   if has_console:
@@ -481,6 +535,350 @@ class MessageRouter:
             except Exception as e:
                     print(f"MessageRouter ERROR: Failed to route self-message: {e}")
                 
+
+
+class MessageValidator:
+    """Centralized message validation and normalization"""
+    
+    def __init__(self, my_callsign):
+        self.my_callsign = my_callsign.upper()
+    
+    def normalize_message_data(self, message_data):
+        """Normalize message data - uppercase and validate early"""
+        normalized = message_data.copy()
+        
+        # Defensive uppercase normalization
+        src_raw = message_data.get('src', '').strip()
+        dst_raw = message_data.get('dst', '').strip()
+        msg_raw = message_data.get('msg', '').strip()
+        
+        # Handle comma-separated src (path routing)
+        src = src_raw.split(',')[0].upper() if ',' in src_raw else src_raw.upper()
+        dst = dst_raw.upper()
+        
+        # Normalize command to uppercase while preserving structure
+        msg = msg_raw.upper() if msg_raw.startswith('!') else msg_raw
+        
+        normalized.update({
+            'src': src,
+            'dst': dst,
+            'msg': msg
+        })
+        
+        if has_console and (src != src_raw or dst != dst_raw):
+            print(f"🔧 Normalized: src='{src_raw}'→'{src}', dst='{dst_raw}'→'{dst}'")
+        
+        return normalized
+
+    def extract_target_callsign(self, msg):
+        """Extract target callsign from command message"""
+        if not msg or not msg.startswith('!'):
+            return None
+        
+        # Ensure message is uppercase for processing
+        msg_upper = msg.upper().strip()
+        parts = msg_upper.split()
+        
+        if len(parts) < 2:
+            return None
+        
+        # Look for target in last part (pattern: !WX DK5EN-15)
+        potential_target = parts[-1].strip()
+        
+        # Validate callsign pattern (letters/numbers, optional SID)
+        if re.match(r'^[A-Z0-9]{2,8}(-\d{1,2})?$', potential_target):
+            if has_console:
+                print(f"🎯 Target extracted: '{potential_target}' from '{msg}'")
+            return potential_target
+        
+        if has_console:
+            print(f"🎯 No valid target in: '{msg}' (checked: '{potential_target}')")
+        return None
+
+    def is_group(self, dst):
+        """Check if destination is a group"""
+        if not dst:
+            return False
+    
+        # Special group 'TEST'
+        if dst.upper() == 'TEST':
+            return True
+    
+        # Numeric groups: 1-99999
+        if dst.isdigit():
+            try:
+                group_num = int(dst)
+                return 1 <= group_num <= 99999
+            except ValueError:
+                return False
+    
+        return False
+
+    def is_valid_destination(self, dst):
+        """Validate destination format (assumes already uppercase)"""
+        if not dst:
+            if has_console:
+                print(f"🔍 Invalid dst: empty")
+            return False
+        
+        # Invalid destinations from table
+        invalid_destinations = ['*', 'ALL', '']
+        if dst in invalid_destinations:
+            if has_console:
+                print(f"🔍 Invalid dst: '{dst}' in blacklist")
+            return False
+        
+        # Valid: callsign pattern
+        if re.match(r'^[A-Z0-9]{2,8}(-\d{1,2})?$', dst):
+            if has_console:
+                print(f"🔍 Valid dst: '{dst}' matches callsign pattern")
+            return True
+        
+        # Valid: group pattern
+        if self.is_group(dst):
+            if has_console:
+                print(f"🔍 Valid dst: '{dst}' is group")
+            return True
+        
+        if has_console:
+            print(f"🔍 Invalid dst: '{dst}' no pattern match")
+
+        return False
+
+    def is_command(self, msg):
+        """Check if message is a command"""
+        return msg and msg.startswith('!')
+
+    def is_self_message(self, src, dst):
+        """Check if message is from us to us"""
+        return src == self.my_callsign and dst == self.my_callsign
+
+
+    def should_suppress_outbound(self, message_data):
+        """Implement simplified suppression logic from table"""
+        src = message_data.get('src', '')
+        dst = message_data.get('dst', '')
+        msg = message_data.get('msg', '')
+        
+        if has_console:
+            print(f"🔍 Suppression check: src='{src}', dst='{dst}', msg='{msg[:20]}...'")
+        
+        # Only check our own outgoing commands
+        if src != self.my_callsign:
+            if has_console:
+                print(f"🔍 → NOT our message ({src} != {self.my_callsign}) - NO SUPPRESSION")
+            return False
+        
+        # Must be a command
+        if not self.is_command(msg):
+            if has_console:
+                print(f"🔍 → Not a command - NO SUPPRESSION")
+            return False
+        
+        # Invalid destinations always suppress
+        if not self.is_valid_destination(dst):
+            if has_console:
+                print(f"🔍 → Invalid destination '{dst}' - SUPPRESS")
+            return True
+        
+        target = self.extract_target_callsign(msg)
+        
+        # No target → execute locally
+        if not target:
+            if has_console:
+                print(f"🔍 → No target in '{msg}' - SUPPRESS (local execution)")
+            return True
+        
+        # Target is us → execute locally
+        if target == self.my_callsign:
+            if has_console:
+                print(f"🔍 → Target is us ({target}) - SUPPRESS (local execution)")
+            return True
+        
+        # Target is someone else → send to mesh
+        if has_console:
+            print(f"🔍 → Target is '{target}' (not us) - NO SUPPRESSION (send to mesh)")
+        return False
+
+    def get_suppression_reason(self, message_data):
+        """Get human-readable reason for suppression decision"""
+        src = message_data.get('src', '')
+        dst = message_data.get('dst', '')
+        msg = message_data.get('msg', '')
+        
+        if src != self.my_callsign:
+            return f"Not our message ({src})"
+        
+        if not self.is_command(msg):
+            return "Not a command"
+        
+        if not self.is_valid_destination(dst):
+            return f"Invalid destination ({dst})"
+        
+        target = self.extract_target_callsign(msg)
+        
+        if not target:
+            return "No target → local execution"
+        
+        if target == self.my_callsign:
+            return f"Target is us ({target}) → local execution"
+        
+        return f"Target is {target} → send to mesh"
+
+
+# In command_handler.py - neue Test-Methode hinzufügen:
+
+def test_kickban_logic(self):
+    """Test kick-ban functionality"""
+    if has_console:
+        print("\n🧪 Testing Kick-Ban Logic:")
+        print("=" * 40)
+    
+    test_cases = [
+        # (requester, args, initial_blocked, expected_result_contains, expected_blocked_after, description)
+        
+        # === Admin Tests ===
+        (self.admin_callsign_base, {}, set(), "Blocklist is empty", set(), "Empty list display"),
+        (self.admin_callsign_base, {'callsign': 'list'}, set(), "Blocklist is empty", set(), "Explicit list command"),
+        
+        # === Add to blocklist ===
+        (self.admin_callsign_base, {'callsign': 'OE1ABC-5'}, set(), "🚫 OE1ABC-5 blocked", {'OE1ABC-5'}, "Add callsign to blocklist"),
+        (self.admin_callsign_base, {'callsign': 'OE1ABC-5'}, {'OE1ABC-5'}, "already blocked", {'OE1ABC-5'}, "Add already blocked callsign"),
+        
+        # === Remove from blocklist ===
+        (self.admin_callsign_base, {'callsign': 'OE1ABC-5', 'action': 'del'}, {'OE1ABC-5'}, "✅ OE1ABC-5 unblocked", set(), "Remove from blocklist"),
+        (self.admin_callsign_base, {'callsign': 'OE1ABC-5', 'action': 'del'}, set(), "was not blocked", set(), "Remove non-blocked callsign"),
+        
+        # === List with content ===
+        (self.admin_callsign_base, {}, {'OE1ABC-5', 'W1XYZ-1'}, "🚫 Blocked: OE1ABC-5, W1XYZ-1", {'OE1ABC-5', 'W1XYZ-1'}, "List multiple blocked"),
+        
+        # === Clear all ===
+        (self.admin_callsign_base, {'callsign': 'delall'}, {'OE1ABC-5', 'W1XYZ-1'}, "✅ Cleared 2 blocked", set(), "Clear all blocked"),
+        (self.admin_callsign_base, {'callsign': 'delall'}, set(), "✅ Cleared 0 blocked", set(), "Clear empty list"),
+        
+        # === Self-blocking prevention ===
+        (self.admin_callsign_base, {'callsign': self.my_callsign}, set(), "❌ Cannot block own callsign", set(), "Prevent self-blocking (exact)"),
+        (self.admin_callsign_base, {'callsign': f'{self.admin_callsign_base}-99'}, set(), "❌ Cannot block own callsign", set(), "Prevent self-blocking (base)"),
+        
+        # === Invalid callsigns ===
+        (self.admin_callsign_base, {'callsign': 'INVALID'}, set(), "❌ Invalid callsign format", set(), "Invalid callsign format"),
+        (self.admin_callsign_base, {'callsign': 'TOO-LONG-123'}, set(), "❌ Invalid callsign format", set(), "Invalid callsign (too long)"),
+        
+        # === Non-admin tests ===
+        ("OE1ABC-5", {}, set(), "❌ Admin access required", set(), "Non-admin list attempt"),
+        ("OE1ABC-5", {'callsign': 'W1XYZ-1'}, set(), "❌ Admin access required", set(), "Non-admin block attempt"),
+        ("OE1ABC-5", {'callsign': 'delall'}, {'OE1ABC-5'}, "❌ Admin access required", {'OE1ABC-5'}, "Non-admin clear attempt"),
+    ]
+    
+    results = []
+    for requester, args, initial_blocked, expected_contains, expected_blocked_after, description in test_cases:
+        # Setup test environment
+        old_blocked = self.blocked_callsigns.copy()
+        self.blocked_callsigns = initial_blocked.copy()
+        
+        try:
+            # Execute command
+            #result = await self.handle_kickban(args, requester)
+            result = self.handle_kickban(args, requester)
+            
+            # Check result contains expected text
+            result_match = expected_contains.lower() in result.lower()
+            
+            # Check final state
+            state_match = self.blocked_callsigns == expected_blocked_after
+            
+            overall_pass = result_match and state_match
+            status = "✅ PASS" if overall_pass else "❌ FAIL"
+            
+            results.append((status, description, overall_pass))
+            
+            if has_console:
+                print(f"{status} | {description}")
+                print(f"     Requester: {requester}")
+                print(f"     Args: {args}")
+                print(f"     Result: '{result}'")
+                if not result_match:
+                    print(f"     ❌ Result should contain: '{expected_contains}'")
+                if not state_match:
+                    print(f"     ❌ Expected blocked: {expected_blocked_after}")
+                    print(f"     ❌ Actual blocked: {self.blocked_callsigns}")
+                print()
+                
+        except Exception as e:
+            status = "❌ ERROR"
+            results.append((status, description, False))
+            if has_console:
+                print(f"{status} | {description}")
+                print(f"     Exception: {e}")
+                print()
+                
+        finally:
+            # Restore original state
+            self.blocked_callsigns = old_blocked
+    
+    # Summary
+    passed = sum(1 for r in results if r[2])
+    total = len(results)
+    
+    if has_console:
+        print(f"🧪 Kick-Ban Test Summary: {passed}/{total} tests passed")
+        if passed == total:
+            print("🎉 All kick-ban tests passed!")
+        else:
+            print("⚠️ Some kick-ban tests failed!")
+            
+            # Show failed tests
+            failed_tests = [r for r in results if not r[2]]
+            if failed_tests:
+                print("\n❌ Failed Tests:")
+                for status, description, _ in failed_tests:
+                    print(f"   • {description}")
+        
+        print("=" * 40)
+    
+    return passed == total
+
+# Auch eine Test-Methode für die Message-Blocking Integration:
+def test_message_blocking_integration(self):
+    """Test message blocking integration with MessageRouter"""
+    if has_console:
+        print("\n🧪 Testing Message Blocking Integration:")
+        print("=" * 45)
+    
+    # This would test the MessageRouter integration
+    # For now, just a placeholder that tests the logic
+    test_callsigns = [
+        ("OE1ABC-5", True, "Normal callsign should pass"),
+        ("W1XYZ-1", True, "Different callsign should pass"),  
+        ("INVALID", False, "Invalid callsign should be handled"),
+    ]
+    
+    results = []
+    for callsign, should_pass, description in test_callsigns:
+        # Test the blocking logic
+        self.blocked_callsigns = {"OE1ABC-5"}  # Block OE1ABC-5
+        
+        # Simulate checking if callsign is blocked
+        is_blocked = callsign in self.blocked_callsigns
+        result_correct = (not is_blocked) == should_pass
+        
+        status = "✅ PASS" if result_correct else "❌ FAIL"
+        results.append((status, description, result_correct))
+        
+        if has_console:
+            print(f"{status} | {description}")
+            print(f"     Callsign: {callsign}, Blocked: {is_blocked}, Should pass: {should_pass}")
+    
+    passed = sum(1 for r in results if r[2])
+    total = len(results)
+    
+    if has_console:
+        print(f"🧪 Blocking Integration Summary: {passed}/{total} tests passed")
+        print("=" * 45)
+
+
+
+
 
 async def main():
     message_store = deque()
@@ -495,7 +893,7 @@ async def main():
     message_router.set_callsign(CALL_SIGN)
 
     #Command Handler Plugin
-    command_handler = create_command_handler(message_router, storage_handler, CALL_SIGN, LAT, LONG, STAT_NAME)
+    command_handler = create_command_handler(message_router, storage_handler, CALL_SIGN, LAT, LONG, STAT_NAME, USER_INFO_TEXT)
 
     message_router.register_protocol('commands', command_handler)
 
@@ -570,17 +968,51 @@ async def main():
        print("Drücke 'q' + Enter zum Beenden und Speichern")
        loop.run_in_executor(None, stdin_reader)
 
-    #print(f"WebSocket ws://{WS_HOST}:{WS_PORT}")
     print(f"UDP-Listen {UDP_PORT_list}, Target MeshCom {UDP_TARGET}")
     print(f"MessageRouter: {len(message_router._subscribers)} message types, {len(message_router._protocols)} protocols")
+
+
+### unit tests
+
+    suppression_passed = True  # Default values
+    command_handler_passed = True
+
+    if has_console:
+        print("\n🧪 Running suppression logic tests...")
+        suppression_passed = message_router.test_suppression_logic()
+    
+        print("\n🧪 Running command handler test suite...")
+        command_handler_passed = await command_handler.run_all_tests()  # Alle Tests auf einmal
+    
+        if suppression_passed and command_handler_passed:
+            print("\n🎉 All tests passed! System ready.")
+        else:
+            print("\n⚠️ Some tests failed. Check implementation.")
+
+### unit tests
+    
+
+
 
     await stop_event.wait()
     
     print("🛑 Stopping proxy server, saving to disc ..")
+
+
+    try:
+        # Step 1: Clean up beacons
+        print("🛑 Stopping beacon tasks...")
+        await asyncio.wait_for(
+            command_handler.cleanup_topic_beacons(), 
+            timeout=5.0
+        )
+    except asyncio.TimeoutError:
+        print("⚠️ Beacon cleanup timeout")
+
     
     # Clean shutdown sequence with timeouts
     try:
-        # Step 1: Disconnect BLE with timeout
+        # Step 2: Disconnect BLE with timeout
         print("🛑 Disconnecting BLE...")
         await asyncio.wait_for(
             message_router.route_command("disconnect BLE"), 
@@ -590,14 +1022,14 @@ async def main():
         print("⚠️ BLE disconnect timeout")
     
     try:
-        # Step 2: Stop UDP handler
+        # Step 3: Stop UDP handler
         print("🛑 Stopping UDP handler...")
         await asyncio.wait_for(udp_handler.stop_listening(), timeout=3.0)
     except asyncio.TimeoutError:
         print("⚠️ UDP stop timeout")
     
     try:
-        # Step 3: Stop WebSocket server
+        # Step 4: Stop WebSocket server
         print("🛑 Stopping WebSocket server...")
         await asyncio.wait_for(websocket_manager.stop_server(), timeout=3.0)
     except asyncio.TimeoutError:
@@ -624,10 +1056,12 @@ if __name__ == "__main__":
     has_console = sys.stdout.isatty()
     config = load_config()
 
-    LAT = config["LAT"]
-    LONG = config["LONG"]
-    STAT_NAME = config["STAT_NAME"]
+    LAT = config.get("LAT")
+    LONG = config.get("LONG")
+    STAT_NAME = config.get("STAT_NAME")
     print(f"WX Service for {STAT_NAME} {LAT}/{LONG}")
+
+    USER_INFO_TEXT = config.get("USER_INFO_TEXT")
 
 
     UDP_PORT_list = config["UDP_PORT_list"]
