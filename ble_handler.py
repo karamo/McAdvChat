@@ -14,7 +14,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.46.0"
+VERSION="v0.47.0"
 
 has_console = sys.stdout.isatty()
 
@@ -1334,7 +1334,7 @@ class BLEClient:
 
       if has_console:
         print(f"\n✅ Scan complete. Not paired {len(self.found_devices)} device(s)")
-      await self._publish_status('scan BLE', 'info', f"✅ Scan complete. Not paired {len(self.found_devices)} device(s)")
+      await self._publish_status('scan BLE', 'info', f"✅ Scan complete, {len(self.found_devices)} not paired device(s)")
 
       for path, (name, addr, rssi) in self.found_devices.items():
           if has_console:
