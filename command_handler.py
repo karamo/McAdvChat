@@ -10,7 +10,7 @@ from datetime import datetime
 from collections import defaultdict, deque
 from meteo import WeatherService
 
-VERSION="v0.49.0"
+VERSION="v0.50.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -193,6 +193,9 @@ class CommandHandler:
 
     def _is_valid_target(self, dst, src):
         """Check if message is for us (callsign) or valid group (1-5 digits or 'TEST')"""
+        if has_console:
+                print(f"🔍 valid_target dubug {dst}, {src}")
+
         # Always allow direct messages to our callsign
         if dst.upper() == self.my_callsign.upper():
             if has_console:
@@ -280,6 +283,10 @@ class CommandHandler:
 
         # Filter for messages directed to us
         dst = message_data.get('dst')
+        if not dst:  # Also check dst exists
+            return
+
+        dst = dst.upper()
 
         src_raw = message_data.get('src', 'unknown')
         if not src_raw or src_raw == "unknown":
@@ -288,6 +295,8 @@ class CommandHandler:
             return
 
         src = src_raw.split(',')[0] if ',' in src_raw else src_raw
+        src = src.upper()
+
         is_valid, target_type = self._is_valid_target(dst, src)
         if not is_valid:
             return
@@ -300,11 +309,6 @@ class CommandHandler:
         msg_text = message_data.get('msg', '')
         msg_text = re.sub(r'\{\d{3}$', '', msg_text)
 
-
-        # Filter for messages directed to us or valid groups  
-        dst = message_data.get('dst')
-        if not dst:  # Also check dst exists
-            return
 
         # SIMPLIFIED: Router handles suppression, we only get valid commands now
         # 1. Direct commands: dst = my_callsign
