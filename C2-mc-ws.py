@@ -11,7 +11,21 @@ from ble_handler import (
 
 from command_handler import create_command_handler
 
-VERSION="v0.48.0"
+VERSION="v0.49.0"
+
+#### debug
+import signal
+import traceback
+
+def debug_signal_handler(signum, frame):
+    """Print stack trace when USR1 signal received"""
+    print("=" * 60)
+    print("🔍 DEBUG: Stack trace at hang point:")
+    print("=" * 60)
+    traceback.print_stack(frame)
+    print("=" * 60)
+#### debug
+
 
 import asyncio
 import errno
@@ -581,6 +595,25 @@ class MessageValidator:
         
         if len(parts) < 2:
             return None
+
+        command = parts[0][1:]
+
+        if command == 'CTCPING':
+            # Look for target:CALLSIGN pattern for execution delegation
+            for part in parts[1:]:
+                if part.startswith('TARGET:'):  # ← FIXED!
+                    potential_target = part[7:]  # Remove 'TARGET:' prefix
+                    if potential_target.upper() in ['LOCAL', '']:
+                        return None  # Local execution
+                    # Validate callsign pattern  
+                    if re.match(r'^[A-Z0-9]{2,8}(-\d{1,2})?$', potential_target):
+                        if has_console:
+                            print(f"🎯 CTCPING target extracted: '{potential_target}' from '{msg}'")
+                        return potential_target
+        
+            # No target parameter = local execution
+            return None
+
         
         # Look for target in last part (pattern: !WX DK5EN-15)
         potential_target = parts[-1].strip()
@@ -970,6 +1003,16 @@ async def main():
 
     print(f"UDP-Listen {UDP_PORT_list}, Target MeshCom {UDP_TARGET}")
     print(f"MessageRouter: {len(message_router._subscribers)} message types, {len(message_router._protocols)} protocols")
+
+
+########### debug
+
+
+    signal.signal(signal.SIGUSR1, debug_signal_handler)
+    print("🔍 DEBUG: Send 'kill -USR1 <pid>' to get stack trace")
+
+
+########### debug
 
 
 ### unit tests

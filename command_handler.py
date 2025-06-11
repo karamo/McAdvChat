@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from meteo import WeatherService
 from typing import Dict, Optional
 
-VERSION="v0.51.0"
+VERSION="v0.52.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -118,8 +118,8 @@ COMMANDS = {
     },
     'ctcping': {
         'handler': 'handle_ctcping',
-        'args': ['call', 'payload', 'repeat'],
-        'format': '!ctcping call:TARGET payload:20 repeat:3',
+        'args': ['target','call', 'payload', 'repeat'],
+        'format': '!ctcping [target:CALL|local], call:TARGET payload:20 repeat:3',
         'description': 'Ping test with roundtrip time measurement'
     },
     'help': {
@@ -226,6 +226,37 @@ class CommandHandler:
             return False, None
         
         target = self.extract_target_callsign(msg)
+
+
+        if src == self.my_callsign:
+            if not target:
+                # No target → local execution intent
+                if has_console:
+                    print(f"🔍 → Our command without target - EXECUTE (local intent)")
+                if dst == self.my_callsign:
+                    return True, 'direct'
+                elif self.is_group(dst):
+                    return True, 'group'
+                else:
+                    return True, 'direct'
+            
+            elif target == self.my_callsign:
+                # Target is us → local execution
+                if has_console:
+                    print(f"🔍 → Our command with our target - EXECUTE (local execution)")
+                if dst == self.my_callsign:
+                    return True, 'direct'
+                elif self.is_group(dst):
+                    return True, 'group'
+                else:
+                    return True, 'direct'
+            
+            else:
+                # Target is someone else → remote execution intended, don't execute locally
+                if has_console:
+                    print(f"🔍 → Our command with remote target '{target}' - NO EXECUTION (remote intent)")
+                return False, None
+
         
         # Target must be us
         if target != self.my_callsign:
@@ -257,23 +288,61 @@ class CommandHandler:
 
     def extract_target_callsign(self, msg):
         """Extract target callsign from command message"""
+        if has_console:
+            print(f"🎯 extract_target_callsign called with: '{msg}'")
         if not msg or not msg.startswith('!'):
+            if has_console:
+                print(f"🎯 Not a command, returning None")
             return None
         
         # Ensure message is uppercase for processing
         msg_upper = msg.upper().strip()
         parts = msg_upper.split()
+
+        if has_console:
+            print(f"🎯 Parts: {parts}")
         
         if len(parts) < 2:
+            if has_console:
+                print(f"🎯 Less than 2 parts, returning None")
             return None
+
+        command = parts[0][1:]  # Remove ! prefix
+        
+        if has_console:
+            print(f"🎯 Command: '{command}'")
+        
+        # Special handling for CTCPING command
+        if command == 'CTCPING':
+        # Look for target:CALLSIGN pattern first
+            for part in parts[1:]:
+                if part.startswith('TARGET:'):
+                    potential_target = part[7:]  # Remove 'TARGET:' prefix
+                    if potential_target.upper() in ['LOCAL', '']:
+                        return None  # Local execution
+                    # Validate callsign pattern
+                    if re.match(r'^[A-Z0-9]{2,8}(-\d{1,2})?$', potential_target):
+                        return potential_target
+
+            return None
+
         
         # Look for target in last part (pattern: !WX DK5EN-15)
         potential_target = parts[-1].strip()
+        if has_console:
+            print(f"🎯 Checking potential target: '{potential_target}'")
         
         # Validate callsign pattern
-        if re.match(r'^[A-Z]{1,2}[0-9][A-Z]{1,3}(-\d{1,2})?$', potential_target):
+        #if re.match(r'^[A-Z]{1,2}[0-9][A-Z]{1,3}(-\d{1,2})?$', potential_target):
+        if re.match(r'^[A-Z0-9]{2,8}(-\d{1,2})?$', potential_target):
+            if has_console:
+                print(f"🎯 Target extracted: '{potential_target}' from '{msg}'")
+            
             return potential_target
         
+        if has_console:
+            print(f"🎯 No valid target in: '{msg}' (checked: '{potential_target}')")
+      
         return None
 
     def is_group(self, dst):
@@ -427,16 +496,24 @@ class CommandHandler:
     
         # Pattern: "CALLSIGN :ackXXX" or "CALLSIGN  :ackXXX" (allow multiple spaces)
         pattern = r'\s+:ack\d{3}$'
-        return bool(re.search(pattern, msg))
+        result = bool(re.search(pattern, msg))
+        print(f"🔍 ACK check: '{msg}' -> {result} pattern:{pattern}")
+        return result
 
 
 
     async def _handle_ack_message(self, message_data: dict):
         """Handle ACK message and calculate RTT"""
         try:
-            src = message_data.get('src', '').upper()
+            src_raw = message_data.get('src', '').upper()
             dst = message_data.get('dst', '').upper()
             msg = message_data.get('msg', '')
+
+            src = src_raw.split(',')[0].strip() if ',' in src_raw else src_raw.strip()
+        
+            if has_console:
+                if ',' in src_raw:
+                    print(f"🏓 ACK path processing: '{src_raw}' → originator: '{src}'")
             
             # Extract ACK ID from message
             # Format: "DK5EN-1 :ack753" or "DK5EN-1  :ack753"
@@ -518,16 +595,23 @@ class CommandHandler:
     
         # Check for {xxx} pattern at the end
         pattern = r'\{\d{3}$'  # Exactly 3 digits after {
-        return bool(re.search(pattern, msg))
+        result = bool(re.search(pattern, msg))
+        print(f"🔍 Echo check: '{msg}' -> {pattern}, result:{result}")
+
+        return result
 
 
 
     async def _handle_echo_message(self, message_data: dict):
         """Handle echo message and start tracking for ACK"""
+        print(f"🔍 ENTERING _handle_echo_message with: {message_data}")
         try:
             src = message_data.get('src', '').upper()
             dst = message_data.get('dst', '').upper()  
             msg = message_data.get('msg', '')
+
+            print(f"🔍 Echo processing: src={src}, dst={dst}, msg='{msg[:30]}...'")
+        
             
             # Extract message ID from {xxx} suffix
             match = re.search(r'\{(\d{3})$', msg)
@@ -684,6 +768,62 @@ class CommandHandler:
     
         
         return f"Active pings: {' | '.join(ping_info)}"
+
+    
+    async def handle_position(self, kwargs, requester):
+        """Show position data for callsign"""
+        callsign = kwargs.get('call', '').upper()
+        days = int(kwargs.get('days', 7))
+        
+        if not callsign:
+            return "❌ Callsign required (call:CALLSIGN)"
+        
+        if not self.storage_handler:
+            return "❌ Message storage not available"
+        
+        # Search through position data
+        cutoff_time = time.time() - (days * 24 * 60 * 60)
+        
+        positions = []
+        for item in reversed(list(self.storage_handler.message_store)):
+            try:
+                raw_data = json.loads(item["raw"])
+                timestamp = raw_data.get('timestamp', 0)
+                
+                # Skip old messages
+                if timestamp < cutoff_time * 1000:
+                    continue
+                    
+                if raw_data.get('type') != 'pos':
+                    continue
+                    
+                src = raw_data.get('src', '')
+                if callsign not in src.upper():
+                    continue
+                    
+                # Extract position info
+                lat = raw_data.get('lat')
+                lon = raw_data.get('long')
+                
+                if lat and lon:
+                    time_str = time.strftime('%H:%M', time.localtime(timestamp/1000))
+                    positions.append({
+                        'lat': lat,
+                        'lon': lon, 
+                        'time': time_str,
+                        'timestamp': timestamp
+                    })
+                    
+            except (json.JSONDecodeError, KeyError):
+                continue
+        
+        if not positions:
+            return f"🔍 No position data for {callsign} in last {days} day(s)"
+        
+        # Get most recent position
+        latest = max(positions, key=lambda x: x['timestamp'])
+        
+        return f"🔍 {callsign} position: {latest['lat']:.4f},{latest['lon']:.4f} (last seen {latest['time']})"
 
 
     async def handle_group_control(self, kwargs, requester):
@@ -985,24 +1125,18 @@ class CommandHandler:
                 elif cmd == 'group' and not kwargs:
                     kwargs['state'] = part
 
+
                 elif cmd == 'ctcping' and not kwargs:
-                    # Handle ctcping arguments: !ctcping call:TARGET payload:20 repeat:3
+                    # Handle ctcping arguments: !ctcping target:CALL call:TARGET payload:20 repeat:3
                     for part in parts[1:]:
                         if ':' in part:
                             key, value = part.split(':', 1)
                             key = key.lower()
-                            if key == 'call':
+                            if key == 'target':
+                                kwargs['target'] = value.upper() if value.upper() != 'LOCAL' else 'local'
+                            elif key == 'call':
                                 kwargs['call'] = value.upper()
-                            elif key == 'payload':
-                                try:
-                                    kwargs['payload'] = int(value)
-                                except ValueError:
-                                    pass
-                            elif key == 'repeat':
-                                try:
-                                    kwargs['repeat'] = int(value)
-                                except ValueError:
-                                    pass
+
 
                 elif cmd == 'topic' and not kwargs:
                     # Handle topic arguments: !topic [group] [text] [interval] | !topic delete group
@@ -1082,27 +1216,36 @@ class CommandHandler:
         except Exception as e:
             return f"❌ Command error: {str(e)[:50]}"
 
-
-
-
-
-
+    
     async def handle_ctcping(self, kwargs, requester):
         """Handle CTC ping test with roundtrip time measurement"""
-        target = kwargs.get('call', '').upper()
-        payload_size = kwargs.get('payload', 20)  # Default 20
-        repeat_count = kwargs.get('repeat', 1)    # Default 1
+        target_node = kwargs.get('target', 'local')
+        ping_target = kwargs.get('call', '').upper()  # WHO gets pinged
+        payload_size = kwargs.get('payload', 20)
+        repeat_count = kwargs.get('repeat', 1)
         
-        # Validation
-        if not target:
+        if not ping_target:
             return "❌ Target callsign required (call:TARGET)"
+
+        # NEW: Validate logical consistency
+        if target_node != 'local' and target_node.upper() != self.my_callsign:
+            # This is requesting remote execution, but we're handling it locally
+            # This means the message routing was wrong
+            return f"❌ Cannot delegate to {target_node} - send message to {target_node} directly"
+    
         
-        if not re.match(r'^[A-Z]{1,2}[0-9][A-Z]{1,3}(-\d{1,2})?$', target):
+        # Validate ping_target format
+        if not re.match(r'^[A-Z]{1,2}[0-9][A-Z]{1,3}(-\d{1,2})?$', ping_target):
             return "❌ Invalid target callsign format"
         
-        if target == self.my_callsign:
+        if ping_target == self.my_callsign:
             return "❌ Cannot ping yourself"
         
+        # Check if ping_target is blocked
+        if hasattr(self, 'blocked_callsigns') and ping_target in self.blocked_callsigns:
+            return f"❌ Target {ping_target} is blocked"
+        
+        # Validate payload and repeat parameters
         try:
             payload_size = int(payload_size)
             if payload_size < 1 or payload_size > 140:
@@ -1117,14 +1260,11 @@ class CommandHandler:
         except (ValueError, TypeError):
             return "❌ Invalid repeat count"
         
-        # Check if target is blocked
-        if hasattr(self, 'blocked_callsigns') and target in self.blocked_callsigns:
-            return f"❌ Target {target} is blocked"
+        # Execute ping test locally
+        await self._start_ping_test(ping_target, payload_size, repeat_count, requester)
         
-        # Start ping test
-        await self._start_ping_test(target, payload_size, repeat_count, requester)
-        
-        return f"🏓 Ping test to {target} started: {repeat_count} ping(s) with {payload_size} bytes payload..."
+        return f"🏓 Ping test to {ping_target} started: {repeat_count} ping(s) with {payload_size} bytes payload..."
+
     
     async def _start_ping_test(self, target: str, payload_size: int, repeat_count: int, requester: str):
         """Start the ping test sequence"""
@@ -1161,7 +1301,7 @@ class CommandHandler:
                     ping_message = base_msg
                 
                 # Send ping message
-                await self._send_ping_message(target, ping_message, sequence, repeat_count, requester)
+                await self._send_ping_message(target, ping_message, sequence, repeat_count, requester, test_id)
                 
                 # Wait between pings (except for last one)
                 if sequence < repeat_count:
@@ -2758,6 +2898,417 @@ class CommandHandler:
             print("=" * 45)
         
         return passed == total
+
+
+
+
+
+
+    def test_intent_based_reception_logic(self):
+        """Test reception logic understanding local vs remote intent"""
+        if has_console:
+            print("\n🧪 Testing Intent-Based Reception Logic:")
+            print("=" * 55)
+        
+        test_cases = [
+            # Format: (src, dst, msg, groups_enabled, expected_exec, expected_type, description)
+            
+            # === OUR OUTGOING COMMANDS ===
+            (self.my_callsign, "20", "!WX", True, True, 'group', "Unsere Gruppe ohne Target → LOCAL intent → execute"),
+            (self.my_callsign, "OE5HWN-12", "!TIME", True, True, 'direct', "Unsere persönlich ohne Target → LOCAL intent → execute"),
+            (self.my_callsign, "20", f"!WX {self.my_callsign}", True, True, 'group', "Unsere Gruppe mit unserem Target → LOCAL execution → execute"),
+            (self.my_callsign, "20", "!WX OE5HWN-12", True, False, None, "Unsere Gruppe mit fremdem Target → REMOTE intent → NO execution"),
+            (self.my_callsign, "OE5HWN-12", "!TIME OE5HWN-12", True, False, None, "Unsere persönlich mit fremdem Target → REMOTE intent → NO execution"),
+            
+            # === INCOMING COMMANDS ===
+            ("OE5HWN-12", "20", f"!WX {self.my_callsign}", True, True, 'group', "Eingehend Gruppe mit unserem Target → execute"),
+            ("OE5HWN-12", "20", f"!WX {self.my_callsign}", False, False, None, "Eingehend Gruppe, Groups OFF → no execute"),
+            ("OE5HWN-12", "20", "!WX OE1ABC-5", True, False, None, "Eingehend Gruppe mit fremdem Target → no execute"),
+            ("OE5HWN-12", "20", "!WX", True, False, None, "Eingehend Gruppe ohne Target → no execute"),
+            ("OE5HWN-12", self.my_callsign, f"!TIME {self.my_callsign}", True, True, 'direct', "Eingehend direkt mit unserem Target → execute"),
+            ("OE5HWN-12", self.my_callsign, "!TIME", True, False, None, "Eingehend direkt ohne Target → no execute"),
+            
+            # === ADMIN OVERRIDES ===
+            (self.admin_callsign_base, "20", f"!WX {self.my_callsign}", False, True, 'group', "Admin override bei Groups OFF"),
+            
+            # === EDGE CASES ===
+            ("OE5HWN-12", "*", f"!WX {self.my_callsign}", True, False, None, "Ungültiges Ziel → no execute"),
+            ("OE5HWN-12", "", f"!TIME {self.my_callsign}", True, False, None, "Leeres Ziel → no execute"),
+        ]
+        
+        results = []
+        for src, dst, msg, groups_enabled, expected_exec, expected_type, description in test_cases:
+            # Setup test environment
+            old_groups_setting = self.group_responses_enabled
+            self.group_responses_enabled = groups_enabled
+            
+            try:
+                # Test execution decision
+                actual_exec, actual_type = self._should_execute_command(src, dst, msg)
+                
+                # Check results
+                exec_match = actual_exec == expected_exec
+                type_match = actual_type == expected_type
+                overall_pass = exec_match and type_match
+                
+                status = "✅ PASS" if overall_pass else "❌ FAIL"
+                results.append((status, description, overall_pass))
+                
+                if has_console:
+                    is_our_msg = src == self.my_callsign
+                    target = self.extract_target_callsign(msg) if hasattr(self, 'extract_target_callsign') else None
+                    intent = "LOCAL" if is_our_msg and (not target or target == self.my_callsign) else "REMOTE" if is_our_msg else "N/A"
+                    
+                    print(f"{status} | {description}")
+                    print(f"     {src}→{dst} '{msg[:25]}...'")
+                    print(f"     Our msg: {is_our_msg}, Target: {target}, Intent: {intent}")
+                    print(f"     Execute: {actual_exec} (exp: {expected_exec}), Type: {actual_type} (exp: {expected_type})")
+                    if not overall_pass:
+                        if not exec_match:
+                            print(f"     ❌ Execution mismatch!")
+                        if not type_match:
+                            print(f"     ❌ Type mismatch!")
+                    print()
+                    
+            finally:
+                # Restore original setting
+                self.group_responses_enabled = old_groups_setting
+        
+        # Summary
+        passed = sum(1 for r in results if r[2])
+        total = len(results)
+        
+        if has_console:
+            print(f"🧪 Intent-Based Reception Summary: {passed}/{total} tests passed")
+            if passed == total:
+                print("🎉 All intent-based reception tests passed!")
+            else:
+                print("⚠️ Some reception tests failed!")
+            print("=" * 55)
+        
+        return passed == total
+
+    
+    async def test_self_command_execution(self):
+        """Test that all self-commands (src=dst=my_callsign) execute locally"""
+        if has_console:
+            print("\n🧪 Testing Self-Command Execution:")
+            print("=" * 50)
+        
+        # Test cases: (command, expected_result_contains, description)
+        test_cases = [
+            # Basic commands
+            ("!WX", ["🌤️", "weather", "°C", "hPa"], "Weather command should return weather data"),
+            ("!TIME", ["🕐", "Uhr", "2025"], "Time command should return current time"),
+            ("!DICE", ["🎲", "DK5EN-1:", "[", "]", "→"], "Dice command should return dice roll"),
+            
+            # Data commands
+            ("!STATS", ["📊", "Stats", "Messages:", "Positions:"], "Stats command should return message statistics"),
+            ("!MHEARD TYPE:POS LIMIT:5", ["📻", "MH:", "📍"], "MHeard command should return heard stations"),
+            
+            # Search commands  
+            ("!SEARCH CALL:DK5EN-1 DAYS:1", ["🔍", "DK5EN-1"], "Search command should return search results"),
+            ("!POS CALL:DK5EN-1", ["🔍", "DK5EN-1"], "Position search should return position data"),
+            
+            # Network commands
+            ("!ctcping target:DK5EN-1 call:DK5EN-99 payload:40 repeat:1", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
+
+            ("!ctcping call:DK5EN-99 payload:20 repeat:1", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
+            #("!ctcping call:DK5EN-99 payload:30", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
+            #("!ctcping call:DK5EN-99", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
+
+            
+            # Help and info
+            ("!HELP", ["📋", "Available commands"], "Help command should return command list"),
+            ("!USERINFO", ["ℹ️"], "User info should return node information"),
+        ]
+        
+        results = []
+        
+        for command, expected_parts, description in test_cases:
+            try:
+                if has_console:
+                    print(f"\n🔄 Testing: {command}")
+                
+                # Simulate self-command: from us to us
+                src = self.my_callsign
+                dst = self.my_callsign
+                
+                # Check if command should execute
+                should_execute, target_type = self._should_execute_command(src, dst, command)
+                
+                if not should_execute:
+                    status = "❌ FAIL"
+                    results.append((status, description, False))
+                    if has_console:
+                        print(f"❌ Command {command} should execute but doesn't")
+                    continue
+                
+                # Parse and execute the command
+                cmd_result = self.parse_command(command)
+                if not cmd_result:
+                    status = "❌ FAIL"
+                    results.append((status, description, False))
+                    if has_console:
+                        print(f"❌ Command {command} failed to parse")
+                    continue
+                
+                cmd, kwargs = cmd_result
+                
+                # Execute the command
+                response = await self.execute_command(cmd, kwargs, src)
+                
+                # Check if response contains expected elements
+                response_lower = response.lower()
+                matches = []
+                for expected in expected_parts:
+                    if expected.lower() in response_lower:
+                        matches.append(expected)
+                
+                # Consider it a pass if at least one expected element is found
+                success = len(matches) > 0
+                status = "✅ PASS" if success else "❌ FAIL"
+                results.append((status, description, success))
+                
+                if has_console:
+                    print(f"{status} | {description}")
+                    print(f"     Command: {command}")
+                    print(f"     Response: {response[:100]}{'...' if len(response) > 100 else ''}")
+                    print(f"     Expected elements: {expected_parts}")
+                    print(f"     Found elements: {matches}")
+                    if not success:
+                        print(f"     ❌ Response should contain at least one of: {expected_parts}")
+                    print()
+            
+            except Exception as e:
+                status = "❌ ERROR"
+                results.append((status, description, False))
+                if has_console:
+                    print(f"❌ ERROR | {description}")
+                    print(f"     Command: {command}")
+                    print(f"     Exception: {e}")
+                    print()
+        
+        # Summary
+        passed = sum(1 for r in results if r[2])
+        total = len(results)
+        
+        if has_console:
+            print(f"🧪 Self-Command Test Summary: {passed}/{total} tests passed")
+            if passed == total:
+                print("🎉 All self-command tests passed!")
+            else:
+                print("⚠️ Some self-command tests failed!")
+                
+                # Show failed tests
+                failed_tests = [r for r in results if not r[2]]
+                if failed_tests:
+                    print("\n❌ Failed Tests:")
+                    for status, description, _ in failed_tests:
+                        print(f"   • {description}")
+            
+            print("=" * 50)
+        
+        return passed == total
+
+    
+    async def test_remote_command_execution(self):
+        """Test that remote commands are properly forwarded to mesh"""
+        if has_console:
+            print("\n🧪 Testing Remote Command Execution:")
+            print("=" * 50)
+        
+        # Test cases: (command, dst, should_execute_locally, expected_routing, description)
+        test_cases = [
+            # Basic commands without target get executed locall
+            ("!TIME", "DK5EN-99", True, "local", "Time command execute locally,forward result to mesh"),
+            ("!DICE", "DK5EN-99", True, "local", "Dice command execute locally,forward result to mesh"),
+            ("!WX", "DK5EN-99", True, "local", "Weather command execute locally,forward result to mesh"),
+            
+            # Commands with targets to remote nodes
+            ("!TIME DK5EN-99", "DK5EN-99", False, "mesh", "Time command with matching target should execute locally"),
+            ("!WX DK5EN-99", "DK5EN-99", False, "mesh", "Weather command with matching target should execute locally"),
+            ("!TIME DK5EN-99", "DK5EN-99", False, "mesh", "Time command with non-matching target should forward to mesh"),
+            
+            # CTCPING remote delegation
+            ("!CTCPING TARGET:DK5EN-99 CALL:DK5EN-1", "DK5EN-99", False, "mesh", "CTCPING delegation should forward to mesh"),
+            ("!CTCPING TARGET:LOCAL CALL:DK5EN-99", "DK5EN-99", True, "local", "CTCPING local execution should run locally"),
+            
+            # Group commands without targets
+            #("!WX", "20", False, "mesh", "Group command without target should forward to mesh"),
+            #("!TIME", "TEST", False, "mesh", "Test group command without target should forward to mesh"),
+            
+            # Group commands with targets
+            #("!WX DK5EN-1", "20", True, "local", "Group command with our target should execute locally"),
+            #("!TIME OE1ABC-5", "20", False, "mesh", "Group command with other target should forward to mesh"),
+        ]
+        
+        results = []
+        
+        for command, dst, should_execute_locally, expected_routing, description in test_cases:
+            try:
+                if has_console:
+                    print(f"\n🔄 Testing: {command} → {dst}")
+                
+                # Simulate command: from us to remote destination
+                src = self.my_callsign
+                
+                # Check if command should execute locally
+                should_execute, target_type = self._should_execute_command(src, dst, command)
+                
+                # Determine expected routing
+                if should_execute_locally:
+                    expected_execute = True
+                    expected_target_type = target_type
+                else:
+                    expected_execute = False
+                    expected_target_type = None
+                
+                # Check execution decision
+                exec_match = should_execute == expected_execute
+                type_match = target_type == expected_target_type
+                
+                # For mesh routing, we expect no local execution
+                if expected_routing == "mesh":
+                    routing_correct = not should_execute
+                else:  # local routing
+                    routing_correct = should_execute
+                
+                overall_pass = exec_match and routing_correct
+                status = "✅ PASS" if overall_pass else "❌ FAIL"
+                
+                results.append((status, description, overall_pass))
+                
+                if has_console:
+                    print(f"{status} | {description}")
+                    print(f"     Command: {command}")
+                    print(f"     Route: {src} → {dst}")
+                    print(f"     Expected: {expected_routing}, Execute: {expected_execute}")
+                    print(f"     Actual: Execute: {should_execute}, Type: {target_type}")
+                    if not overall_pass:
+                        if not exec_match:
+                            print(f"     ❌ Execution mismatch: got {should_execute}, expected {expected_execute}")
+                        if not routing_correct:
+                            print(f"     ❌ Routing mismatch: expected {expected_routing}")
+                    print()
+            
+            except Exception as e:
+                status = "❌ ERROR"
+                results.append((status, description, False))
+                if has_console:
+                    print(f"❌ ERROR | {description}")
+                    print(f"     Command: {command}")
+                    print(f"     Exception: {e}")
+                    print()
+        
+        # Summary
+        passed = sum(1 for r in results if r[2])
+        total = len(results)
+        
+        if has_console:
+            print(f"🧪 Remote Command Test Summary: {passed}/{total} tests passed")
+            if passed == total:
+                print("🎉 All remote command tests passed!")
+            else:
+                print("⚠️ Some remote command tests failed!")
+                
+                # Show failed tests
+                failed_tests = [r for r in results if not r[2]]
+                if failed_tests:
+                    print("\n❌ Failed Tests:")
+                    for status, description, _ in failed_tests:
+                        print(f"   • {description}")
+            
+            print("=" * 50)
+        
+        return passed == total
+    
+    
+    async def test_self_command_suppression_logic(self):
+        """Test that self-commands are properly suppressed (not sent to mesh)"""
+        if has_console:
+            print("\n🧪 Testing Self-Command Suppression Logic:")
+            print("=" * 55)
+        
+        # All these should be suppressed (executed locally, not sent to mesh)
+        test_cases = [
+            ("!WX", "Weather command without target"),
+            ("!TIME", "Time command without target"), 
+            ("!DICE", "Dice command without target"),
+            ("!STATS", "Stats command without target"),
+            ("!HELP", "Help command without target"),
+            ("!USERINFO", "User info command without target"),
+            ("!SEARCH CALL:DK5EN-1", "Search command without target"),
+            ("!MHEARD LIMIT:5", "MHeard command without target"),
+            ("!CTCPING CALL:OE5HWN-12", "CTC Ping command (has implicit target but to us)"),
+            (f"!WX {self.my_callsign}", "Weather command with our target"),
+            (f"!TIME {self.my_callsign}", "Time command with our target"),
+        ]
+        
+        results = []
+        
+        # Get validator from message router
+        if not self.message_router or not hasattr(self.message_router, 'validator'):
+            if has_console:
+                print("❌ No validator available for suppression testing")
+            return False
+        
+        validator = self.message_router.validator
+        
+        for command, description in test_cases:
+            try:
+                # Create test message data
+                test_data = {
+                    'src': self.my_callsign,
+                    'dst': self.my_callsign, 
+                    'msg': command
+                }
+                
+                # Normalize the data
+                normalized = validator.normalize_message_data(test_data)
+                
+                # Check if it should be suppressed
+                should_suppress = validator.should_suppress_outbound(normalized)
+                reason = validator.get_suppression_reason(normalized)
+                
+                # Self-commands should ALWAYS be suppressed
+                success = should_suppress == True
+                status = "✅ PASS" if success else "❌ FAIL"
+                results.append((status, description, success))
+                
+                if has_console:
+                    print(f"{status} | {description}")
+                    print(f"     Command: {command}")
+                    print(f"     Suppressed: {should_suppress} (expected: True)")
+                    print(f"     Reason: {reason}")
+                    if not success:
+                        print(f"     ❌ Self-command should be suppressed!")
+                    print()
+            
+            except Exception as e:
+                status = "❌ ERROR"
+                results.append((status, description, False))
+                if has_console:
+                    print(f"❌ ERROR | {description}")
+                    print(f"     Exception: {e}")
+                    print()
+        
+        # Summary
+        passed = sum(1 for r in results if r[2])
+        total = len(results)
+        
+        if has_console:
+            print(f"🧪 Self-Command Suppression Summary: {passed}/{total} tests passed")
+            if passed == total:
+                print("🎉 All self-command suppression tests passed!")
+            else:
+                print("⚠️ Some suppression tests failed!")
+            print("=" * 55)
+        
+        return passed == total
+
+
+
     
     async def run_all_tests(self):
         """Run complete test suite for CommandHandler"""
@@ -2767,15 +3318,25 @@ class CommandHandler:
             print("="*60)
         
         basic_passed = self.test_reception_logic()
+        intent_passed = self.test_intent_based_reception_logic() 
         edge_passed = await self.test_reception_edge_cases()
         kickban_passed = await self.test_kickban_logic()
         blocking_passed = self.test_message_blocking_integration()
         topic_passed = await self.test_topic_logic()
         ctcping_passed = await self.test_ctcping_logic()  # NEUE ZEILE
+
+
+        self_exec_passed = await self.test_self_command_execution()
+        self_suppress_passed = await self.test_self_command_suppression_logic()
+
+        remote_exec_passed = await self.test_remote_command_execution()  # NEW
     
-        total_passed = all([basic_passed, edge_passed, kickban_passed, blocking_passed, topic_passed, ctcping_passed])
-    
-        
+        total_passed = all([
+            basic_passed, intent_passed, edge_passed, kickban_passed, 
+            blocking_passed, topic_passed, ctcping_passed,
+            self_exec_passed, self_suppress_passed, remote_exec_passed  # ADD THIS
+        ])  
+
         if has_console:
             if total_passed:
                 print("\n🎉 ALL COMMAND HANDLER TESTS PASSED!")
