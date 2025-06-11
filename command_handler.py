@@ -10,7 +10,7 @@ from datetime import datetime
 from collections import defaultdict, deque
 from meteo import WeatherService
 
-VERSION="v0.46.0"
+VERSION="v0.47.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -308,15 +308,21 @@ class CommandHandler:
         
         # Check if message contains a command
         if not msg_text.startswith('!'):
+            print(f"📋❌ CommandHandler: command doesn't start with '!'")
             return
 
         # ERWEITERTE FILTER LOGIK für !wx DK5EN .. damit nicht all losquaken
         # 1. Direkte Commands an uns: dst = my_callsign
         # 2. Gruppen-Commands: dst = numerische Gruppe UND message erwähnt uns
         is_direct_command = (dst == self.my_callsign)
-        is_group_command = (dst and dst.isdigit() and self.my_callsign in msg_text)
+        is_group_command = (dst and dst.isdigit() and self.my_callsign.upper() in msg_text.upper())
+
+        if has_console:
+            print(f"📋 CommandHandler: Direktbefehl {is_direct_command} oder Gruppen {is_group_command}")
+            print(f"{dst} {dst.isdigit()} {self.my_callsign} {msg_text}")
     
         if not (is_direct_command or is_group_command):
+            print(f"📋❌ CommandHandler: neither group or direct command detected, aborting command handling")
             return  # Nicht für uns bestimmt
             
         if has_console:
