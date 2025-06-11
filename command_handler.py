@@ -10,7 +10,7 @@ from datetime import datetime
 from collections import defaultdict, deque
 from meteo import WeatherService
 
-VERSION="v0.48.0"
+VERSION="v0.49.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -194,7 +194,7 @@ class CommandHandler:
     def _is_valid_target(self, dst, src):
         """Check if message is for us (callsign) or valid group (1-5 digits or 'TEST')"""
         # Always allow direct messages to our callsign
-        if dst == self.my_callsign:
+        if dst.upper() == self.my_callsign.upper():
             if has_console:
                 print(f"🔍 valid_target Ture, callsign")
             return True, 'callsign'
