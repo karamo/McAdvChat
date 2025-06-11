@@ -10,7 +10,7 @@ from datetime import datetime
 from collections import defaultdict, deque
 from meteo import WeatherService
 
-VERSION="v0.47.0"
+VERSION="v0.48.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -195,21 +195,31 @@ class CommandHandler:
         """Check if message is for us (callsign) or valid group (1-5 digits or 'TEST')"""
         # Always allow direct messages to our callsign
         if dst == self.my_callsign:
+            if has_console:
+                print(f"🔍 valid_target Ture, callsign")
             return True, 'callsign'
         
         # Check if dst is a valid group format
         is_valid_group = dst == 'TEST' or (dst and dst.isdigit() and 1 <= len(dst) <= 5)
         if not is_valid_group:
+            if has_console:
+                print(f"🔍 valid_target False, None")
             return False, None
         
         # Admin always allowed for groups
         if self._is_admin(src):
+            if has_console:
+                print(f"🔍 valid_target admin override, True, group")
             return True, 'group'
         
         # Non-admin only allowed if group responses are enabled
         if self.group_responses_enabled:
+            if has_console:
+                print(f"🔍 valid_target group responses enabled, True, group")
             return True, 'group'
         
+        if has_console:
+                print(f"🔍 valid_target no match, False, None")
         return False, None
 
     async def handle_weather(self, kwargs, requester):
@@ -262,6 +272,12 @@ class CommandHandler:
         if not msg_text or not msg_text.startswith('!'):
             return
 
+        msg_id = message_data.get('msg_id')
+        if self._is_duplicate_msg_id(msg_id):
+            if has_console:
+                print(f"🔄 CommandHandler: Duplicate msg_id {msg_id}, src_type {src_type}, ignoring silently")
+            return
+
         # Filter for messages directed to us
         dst = message_data.get('dst')
 
@@ -275,11 +291,11 @@ class CommandHandler:
         is_valid, target_type = self._is_valid_target(dst, src)
         if not is_valid:
             return
-    
+
         if has_console:
             admin_status = " (ADMIN)" if self._is_admin(src) else ""
             group_status = " [Groups: ON]" if self.group_responses_enabled else " [Groups: OFF]"
-            print(f"📋 CommandHandler: Valid target detected - {dst} ({target_type})")
+            print(f"📋 CommandHandler: Valid target detected - {dst} ({target_type}) {admin_status} {group_status}")
             
         msg_text = message_data.get('msg', '')
         msg_text = re.sub(r'\{\d{3}$', '', msg_text)
@@ -289,42 +305,35 @@ class CommandHandler:
         dst = message_data.get('dst')
         if not dst:  # Also check dst exists
             return
-    
-        is_valid, target_type = self._is_valid_target(dst, src)
-        if not is_valid:
-            return
 
-        # Determine where to send the response
-        if target_type == 'callsign':
-            response_target = src  # Reply to sender
-        elif target_type == 'group':
-            response_target = dst  # Reply to group
-        else:
-            response_target = src  # Fallback
-    
-        if has_console:
-            print(f"📋 CommandHandler: Response will be sent to {response_target} ({target_type})")
-
+        # SIMPLIFIED: Router handles suppression, we only get valid commands now
+        # 1. Direct commands: dst = my_callsign
+        # 2. Group commands: dst = numeric group (router already filtered)
         
-        # Check if message contains a command
-        if not msg_text.startswith('!'):
-            print(f"📋❌ CommandHandler: command doesn't start with '!'")
-            return
-
-        # ERWEITERTE FILTER LOGIK für !wx DK5EN .. damit nicht all losquaken
-        # 1. Direkte Commands an uns: dst = my_callsign
-        # 2. Gruppen-Commands: dst = numerische Gruppe UND message erwähnt uns
         is_direct_command = (dst == self.my_callsign)
-        is_group_command = (dst and dst.isdigit() and self.my_callsign.upper() in msg_text.upper())
-
-        if has_console:
-            print(f"📋 CommandHandler: Direktbefehl {is_direct_command} oder Gruppen {is_group_command}")
-            print(f"{dst} {dst.isdigit()} {self.my_callsign} {msg_text}")
-    
+        is_group_command = (dst and (dst.isdigit() or dst == 'TEST'))
+        
         if not (is_direct_command or is_group_command):
-            print(f"📋❌ CommandHandler: neither group or direct command detected, aborting command handling")
-            return  # Nicht für uns bestimmt
-            
+            print(f"📋❌ CommandHandler: Invalid command target, aborting")
+            return
+        
+        if has_console:
+            command_type = "direct" if is_direct_command else "group"
+            print(f"📋 CommandHandler: Processing {command_type} command '{msg_text}' from {src} to {dst}")
+
+        # Simplified response target logic
+        if is_direct_command:
+            response_target = src  # Reply to sender
+        else:
+            response_target = dst  # Reply to group
+        
+        if has_console:
+            target_type = "direct" if is_direct_command else "group"  
+            print(f"📋 CommandHandler: Response will be sent to {response_target} ({target_type})")
+        
+
+
+
         if has_console:
             print(f"📋 CommandHandler: Processing command '{msg_text}' from {src} to {dst}")
 
@@ -342,11 +351,6 @@ class CommandHandler:
                     print(f"🔴 CommandHandler: User {src} blocked - notification already sent, ignoring silently")
             return
 
-        msg_id = message_data.get('msg_id')
-        if self._is_duplicate_msg_id(msg_id):
-            if has_console:
-                print(f"🔄 CommandHandler: Duplicate msg_id {msg_id}, src_type {src_type}, ignoring silently")
-            return
 
         content_hash = self._get_content_hash(src, msg_text, dst)
         if self._is_throttled(content_hash):

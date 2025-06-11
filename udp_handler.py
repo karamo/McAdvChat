@@ -5,7 +5,7 @@ import json
 import time
 import unicodedata
 
-VERSION="v0.47.0"
+VERSION="v0.48.0"
 
 
 def is_allowed_char(ch: str) -> bool:
@@ -47,7 +47,7 @@ def is_allowed_char(ch: str) -> bool:
     if category.startswith("S") or category.startswith("P") or "EMOJI" in unicodedata.name(ch, ""):
         return True
     
-    print("ende false")
+    print("Illigal character detected and suppressed")
     return False
 
 

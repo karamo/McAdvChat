@@ -11,7 +11,7 @@ from ble_handler import (
 
 from command_handler import create_command_handler
 
-VERSION="v0.46.0"
+VERSION="v0.47.0"
 
 import asyncio
 import errno
@@ -74,8 +74,21 @@ class MessageRouter:
         """Handle UDP messages from WebSocket and route to UDP handler"""
         message_data = routed_message['data']
 
+        if not message_data.get('src') and self.my_callsign:
+            message_data['src'] = self.my_callsign
+
         if has_console:
             print(f"📡 UDP Message Handler: Processing message to {message_data.get('dst')}")
+
+
+        # NEW: Check if this is own group command that should be suppressed
+        if self._should_suppress_outbound(message_data):
+            # Route to CommandHandler but don't send to mesh
+            if has_console:
+                print(f"📡 UDP Message Handler: Route to CommandHandler but don't send to mesh")
+            synthetic_message = self._create_synthetic_message(message_data, 'udp')
+            await self._route_to_command_handler(synthetic_message)
+            return
     
         # Check if this is a self-message first
         is_self_message = await self._handle_outgoing_message(message_data, 'udp')
@@ -84,6 +97,7 @@ class MessageRouter:
             if has_console:
                 print(f"📡 UDP Message Handler: Self-message handled, not sending to mesh")
             return
+
     
         # External message - send to mesh network
         if has_console:
@@ -121,9 +135,23 @@ class MessageRouter:
         message_data = routed_message['data']
         msg = message_data.get('msg')
         dst = message_data.get('dst')
+
+        # NORMALIZE: Add src field if missing (messages from our WebSocket)
+        if not message_data.get('src') and self.my_callsign:
+            message_data['src'] = self.my_callsign
         
         if has_console:
             print(f"📱 BLE Message Handler: Processing message '{msg}' to '{dst}'")
+
+        # NEW: Check if this is own group command that should be suppressed
+        if self._should_suppress_outbound(message_data):
+            # Route to CommandHandler but don't send to device
+            if has_console:
+                print(f"📱 BLE Message Handler: Route to CommandHandler but don't send to device")
+            synthetic_message = self._create_synthetic_message(message_data, 'ble')
+            await self._route_to_command_handler(synthetic_message)
+            return
+
     
         # Check if this is a self-message first
         is_self_message = await self._handle_outgoing_message(message_data, 'ble')
@@ -372,8 +400,31 @@ class MessageRouter:
         dst = message_data.get('dst', '').upper()
         msg = message_data.get('msg', '')
 
-        #return dst == self.my_callsign and msg.startswith('!')
         return dst == self.my_callsign
+
+
+    def _should_suppress_outbound(self, message_data):
+        """Check if outbound message should be suppressed (own group commands)"""
+        if not self.my_callsign:
+            return False
+            
+        src = message_data.get('src', '')
+        dst = message_data.get('dst', '')
+        msg = message_data.get('msg', '')
+        if has_console:
+             print(f"🔍 Suppress check: src='{src}', dst='{dst}', msg='{msg[:20]}...'")
+        
+        # Suppress own commands to groups
+        is_own_group_command = (
+            src == self.my_callsign and
+            dst and (dst.isdigit() or dst.upper() == 'TEST') and
+            msg.startswith('!')
+        )
+        
+        if not self.my_callsign:
+            print(f"🔍 Suppress result: {is_own_group_command}")
+
+        return is_own_group_command
 
     def _create_synthetic_message(self, original_message, protocol_type='udp'):
         """Create a synthetic message that looks like it came from LoRa"""
