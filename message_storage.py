@@ -11,7 +11,7 @@ from functools import partial
 from statistics import mean
 from collections import OrderedDict
 
-VERSION="v0.45.0"
+VERSION="v0.46.0"
 
 has_console = sys.stdout.isatty()
 
@@ -126,6 +126,9 @@ class MessageStorageHandler:
             return True
             
         if src == "response":
+            return True
+
+        if src_type == "TEST":
             return True
             
         if msg_content == "-- invalid character --":
