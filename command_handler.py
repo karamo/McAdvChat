@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from meteo import WeatherService
 from typing import Dict, Optional
 
-VERSION="v0.52.0"
+VERSION="v0.53.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -288,8 +288,10 @@ class CommandHandler:
 
     def extract_target_callsign(self, msg):
         """Extract target callsign from command message"""
+        print(" new new and updated version is being executed")
         if has_console:
             print(f"🎯 extract_target_callsign called with: '{msg}'")
+
         if not msg or not msg.startswith('!'):
             if has_console:
                 print(f"🎯 Not a command, returning None")
@@ -300,6 +302,7 @@ class CommandHandler:
         parts = msg_upper.split()
 
         if has_console:
+            print(f"🎯 msg_upper: {msg_upper}")
             print(f"🎯 Parts: {parts}")
         
         if len(parts) < 2:
@@ -314,18 +317,41 @@ class CommandHandler:
         
         # Special handling for CTCPING command
         if command == 'CTCPING':
-        # Look for target:CALLSIGN pattern first
+            print(f"🎯 Command: inside ctcping handling")
+
+            # Look for target:CALLSIGN pattern first
             for part in parts[1:]:
+                print(f"🎯 Command: part is {part}")
+               
                 if part.startswith('TARGET:'):
                     potential_target = part[7:]  # Remove 'TARGET:' prefix
+                    if has_console:
+                       print(f"🎯 portential_target: '{potential_target}'")
                     if potential_target.upper() in ['LOCAL', '']:
                         return None  # Local execution
                     # Validate callsign pattern
                     if re.match(r'^[A-Z0-9]{2,8}(-\d{1,2})?$', potential_target):
                         return potential_target
 
+            potential_target = parts[-1].strip()
+            if has_console:
+                 print(f"🎯 portential_target: '{potential_target}'")
+            if re.match(r'^[A-Z0-9]{2,8}(-\d{1,2})?$', potential_target):
+                if has_console:
+                    print(f"🎯 CTCPING target (at end): '{potential_target}' from '{msg}'")
+                return potential_target
+
+            # No CTCPING target found - MOVE THIS INSIDE THE IF BLOCK
+            if has_console:
+                print(f"🎯 No valid CTCPING target found")
             return None
 
+
+    
+        # No target found
+        #return None
+        if has_console:
+            print(f"🎯 Processing standard command")
         
         # Look for target in last part (pattern: !WX DK5EN-15)
         potential_target = parts[-1].strip()
@@ -333,7 +359,6 @@ class CommandHandler:
             print(f"🎯 Checking potential target: '{potential_target}'")
         
         # Validate callsign pattern
-        #if re.match(r'^[A-Z]{1,2}[0-9][A-Z]{1,3}(-\d{1,2})?$', potential_target):
         if re.match(r'^[A-Z0-9]{2,8}(-\d{1,2})?$', potential_target):
             if has_console:
                 print(f"🎯 Target extracted: '{potential_target}' from '{msg}'")
@@ -344,6 +369,9 @@ class CommandHandler:
             print(f"🎯 No valid target in: '{msg}' (checked: '{potential_target}')")
       
         return None
+
+
+
 
     def is_group(self, dst):
         """Check if destination is a group"""
@@ -501,8 +529,120 @@ class CommandHandler:
         return result
 
 
-
+    
     async def _handle_ack_message(self, message_data: dict):
+        """Handle ACK message and calculate RTT"""
+        try:
+            src_raw = message_data.get('src', '').upper()
+            dst = message_data.get('dst', '').upper()
+            msg = message_data.get('msg', '')
+
+            src = src_raw.split(',')[0].strip() if ',' in src_raw else src_raw.strip()
+
+            if has_console:
+                if ',' in src_raw:
+                    print(f"🏓 ACK path processing: '{src_raw}' → originator: '{src}'")
+        
+            # Extract ACK ID from message
+            # Format: "DK5EN-1 :ack753" or "DK5EN-1  :ack753"
+            match = re.search(r'\s+:ack(\d{3})$', msg)
+            if not match:
+                return
+        
+            ack_id = match.group(1)
+            
+            # Check if we have a matching ping
+            if ack_id not in self.active_pings:
+                if has_console:
+                    print(f"🏓 Received ACK {ack_id} from {src}, but no matching ping found")
+                return
+            
+            ping_info = self.active_pings[ack_id]
+            
+            # Verify the ACK comes from the expected target
+            if src != ping_info['target'] or dst != self.my_callsign:
+                if has_console:
+                    print(f"🏓 ACK {ack_id} verification failed: src={src}, expected={ping_info['target']}")
+                return
+            
+            # Calculate RTT and create result
+            receive_time = time.time()
+            sent_time = ping_info['sent_time']
+            rtt = receive_time - sent_time
+    
+            result = {
+                'sequence': ping_info.get('sequence_info', ''),
+                'rtt': rtt,
+                'status': 'success',
+                'timestamp': receive_time
+            }
+            
+            test_id = ping_info.get('test_id')
+            
+            # Record result and check completion (DRY!)
+            test_completed = await self._record_ping_result(test_id, result) if test_id else False
+            
+            # Remove from active pings
+            del self.active_pings[ack_id]
+            
+            # Send individual result only if test is still running
+            if test_id and test_id in self.ping_tests:
+                rtt_ms = rtt * 1000
+                result_msg = f"🏓 Ping {result['sequence']} to {ping_info['target']}: RTT = {rtt_ms:.1f}ms"
+                await self._send_ping_result(ping_info['requester'], result_msg)
+            
+            if has_console:
+                print(f"🏓 ACK processed: ID={ack_id}, RTT={rtt*1000:.1f}ms, Test complete: {test_completed}")
+                    
+        except Exception as e:
+            if has_console:
+                print(f"❌ Error handling ACK message: {e}")
+
+
+    async def _record_ping_result(self, test_id: str, result: dict) -> bool:
+        """Record ping result and check for test completion. Returns True if test completed."""
+        if test_id not in self.ping_tests:
+            return False
+        
+        test_summary = self.ping_tests[test_id]
+        
+        # Add result to test
+        test_summary['results'].append(result)
+        
+        # Update counters based on result type
+        if result['status'] == 'success':
+            test_summary['completed'] += 1
+        elif result['status'] == 'timeout':
+            test_summary['timeouts'] += 1
+        
+        # Check if test is now complete
+        if self._check_test_completion(test_id):
+            if has_console:
+                print(f"🏓 Test {test_id} completed via {result['status']}")
+            await self._complete_test(test_id)
+            return True
+        
+        return False
+
+
+    def _check_test_completion(self, test_id: str) -> bool:
+        """Check if test is complete and return completion status"""
+        if test_id not in self.ping_tests:
+            return False
+        
+        test_summary = self.ping_tests[test_id]
+        total_completed = test_summary['completed'] + test_summary['timeouts']
+        
+        is_complete = total_completed >= test_summary['total_pings']
+        
+        if has_console and is_complete:
+            print(f"🔍 Test {test_id} completion detected: {test_summary['completed']} success + {test_summary['timeouts']} timeouts = {total_completed}/{test_summary['total_pings']}")
+        
+        return is_complete
+
+
+
+    async def _handle_ack_message_old(self, message_data: dict):
         """Handle ACK message and calculate RTT"""
         try:
             src_raw = message_data.get('src', '').upper()
@@ -687,10 +827,55 @@ class CommandHandler:
 
         return has_ping_test and has_measurement
 
-        
-    
-    # Timeout-Task für Pings:
+            
     async def _ping_timeout_task(self, message_id: str):
+        """Handle ping timeout after 30 seconds"""
+        try:
+            await asyncio.sleep(self.ping_timeout)  # 30 seconds
+            
+            # Check if ping is still active
+            if message_id not in self.active_pings:
+                return  # ACK was received
+            
+            ping_info = self.active_pings[message_id]
+            
+            if ping_info['status'] != 'waiting_ack':
+                return  # Already processed
+            
+            # Create timeout result
+            timeout_result = {
+                'sequence': ping_info.get('sequence_info', ''),
+                'rtt': None,
+                'status': 'timeout',
+                'timestamp': time.time()
+            }
+            
+            test_id = ping_info.get('test_id')
+            
+            # Record result and check completion (DRY!)
+            test_completed = await self._record_ping_result(test_id, timeout_result) if test_id else False
+            
+            # Remove from active pings
+            del self.active_pings[message_id]
+            
+            # Send individual timeout result only if test is still running
+            if test_id and test_id in self.ping_tests:
+                timeout_msg = f"🏓 Ping {timeout_result['sequence']} to {ping_info['target']}: timeout (no ACK after 30s)"
+                await self._send_ping_result(ping_info['requester'], timeout_msg)
+            
+            if has_console:
+                print(f"⏰ Timeout processed: ID={message_id}, Test complete: {test_completed}")
+                        
+        except asyncio.CancelledError:
+            pass  # Expected when ACK received
+        except Exception as e:
+            if has_console:
+                print(f"❌ Error in ping timeout task: {e}")
+
+
+
+    
+    async def _ping_timeout_task_old(self, message_id: str):
         """Handle ping timeout after 30 seconds"""
         try:
             await asyncio.sleep(self.ping_timeout)  # 30 seconds
@@ -859,6 +1044,14 @@ class CommandHandler:
 
     def _is_valid_target(self, dst, src):
         """Check if message is for us (callsign) or valid group (1-5 digits or 'TEST')"""
+        aprs_position_pattern = r'^!\d{4}\.\d{2}[NS]/\d{5}\.\d{2}[EW]'
+    
+        if re.match(aprs_position_pattern, msg_text):
+            if has_console:
+                print(f"🌍 APRS position detected, not a command: {msg_text[:30]}...")
+            return False
+
+
         if has_console:
                 print(f"🔍 valid_target dubug {dst}, {src}")
 
@@ -1281,7 +1474,8 @@ class CommandHandler:
             'results': [],  # List of individual ping results
             'completed': 0,
             'timeouts': 0,
-            'status': 'running'
+            'status': 'running',
+            'monitor_task': None 
     }
 
         self.ping_tests[test_id] = test_summary
@@ -1295,7 +1489,7 @@ class CommandHandler:
                 if len(base_msg) > payload_size:
                     ping_message = base_msg[:payload_size]
                 elif len(base_msg) < payload_size:
-                    padding = 'X' * (payload_size - len(base_msg))
+                    padding = '.' * (payload_size - len(base_msg))
                     ping_message = base_msg + padding
                 else:
                     ping_message = base_msg
@@ -1305,9 +1499,11 @@ class CommandHandler:
                 
                 # Wait between pings (except for last one)
                 if sequence < repeat_count:
-                    await asyncio.sleep(12.0)  
+                    await asyncio.sleep(20.0)  
 
-            asyncio.create_task(self._monitor_test_completion(test_id))                    
+            #asyncio.create_task(self._monitor_test_completion(test_id))                    
+            monitor_task = asyncio.create_task(self._monitor_test_completion(test_id))
+            test_summary['monitor_task'] = monitor_task
 
         except Exception as e:
             if has_console:
@@ -1631,8 +1827,37 @@ class CommandHandler:
             self.ping_tests.clear()
 
 
-
-
+    
+    async def _complete_test(self, test_id: str):
+        """Complete a test: cancel monitor, send summary, cleanup"""
+        try:
+            if test_id not in self.ping_tests:
+                if has_console:
+                    print(f"🧹 Test {test_id} already cleaned up")
+                return
+            
+            test_summary = self.ping_tests[test_id]
+            
+            # Cancel monitor task if it exists and is running
+            monitor_task = test_summary.get('monitor_task')
+            if monitor_task and not monitor_task.done():
+                if has_console:
+                    print(f"🧹 Cancelling monitor task for {test_id}")
+                monitor_task.cancel()
+                try:
+                    await monitor_task
+                except asyncio.CancelledError:
+                    pass  # Expected
+            
+            # Mark as completed and send summary
+            test_summary['status'] = 'completed'
+            test_summary['end_time'] = time.time()
+            
+            await self._send_test_summary(test_id)
+            
+        except Exception as e:
+            if has_console:
+                print(f"❌ Error completing test {test_id}: {e}")
 
 
 
@@ -1691,9 +1916,6 @@ class CommandHandler:
 
 
 
-
-
-
     async def _send_test_summary(self, test_id: str, error_msg: str = None):
         """Send complete test summary to requester"""
         try:
@@ -1709,20 +1931,24 @@ class CommandHandler:
                 # Calculate statistics
                 results = test_summary['results']
                 total_pings = test_summary['total_pings']
+
+                # Filter out None RTT values (timeouts)
+                successful_rtts = [r['rtt'] for r in results if r['rtt'] is not None]
                 successful = len(results)
                 timeouts = test_summary['timeouts']
+
                 loss_percent = int(((total_pings - successful) / total_pings) * 100)
                 
                 target = test_summary['target']
                 payload_size = test_summary['payload_size']
                 
-                if successful > 0:
-                    rtts = [r['rtt'] for r in results]
-                    min_rtt = min(rtts) * 1000
-                    max_rtt = max(rtts) * 1000
-                    avg_rtt = (sum(rtts) / len(rtts)) * 1000
-                    
-                    summary_msg = f"🏓 Ping summary to {target}: {successful}/{total_pings} replies, {loss_percent}% loss, {payload_size}B payload. RTT min/avg/max = {min_rtt:.1f}/{avg_rtt:.1f}/{max_rtt:.1f}ms"
+                if successful > 0 and successful_rtts:
+                        min_rtt = min(successful_rtts) * 1000
+                        max_rtt = max(successful_rtts) * 1000
+                        avg_rtt = (sum(successful_rtts) / len(successful_rtts)) * 1000
+        
+                        summary_msg = f"🏓 Ping summary to {target}: {successful}/{total_pings} replies, {loss_percent}% loss, {payload_size}B payload. RTT min/avg/max = {min_rtt:.1f}/{avg_rtt:.1f}/{max_rtt:.1f}ms"
+   
                 else:
                     summary_msg = f"🏓 Ping summary to {target}: {loss_percent}% packet loss ({successful}/{total_pings}), {payload_size}B payload"
                 
@@ -1737,6 +1963,8 @@ class CommandHandler:
         except Exception as e:
             if has_console:
                 print(f"❌ Error sending test summary: {e}")
+                import traceback
+                traceback.print_exc()
 
 
 
@@ -3010,12 +3238,13 @@ class CommandHandler:
             ("!SEARCH CALL:DK5EN-1 DAYS:1", ["🔍", "DK5EN-1"], "Search command should return search results"),
             ("!POS CALL:DK5EN-1", ["🔍", "DK5EN-1"], "Position search should return position data"),
             
-            # Network commands
-            ("!ctcping target:DK5EN-1 call:DK5EN-99 payload:40 repeat:1", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
+            # Network commands - temporary disabled
+            ("!ctcping target:DK5EN-1 call:DK5EN-99 payload:80 repeat:1", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
 
-            ("!ctcping call:DK5EN-99 payload:20 repeat:1", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
-            #("!ctcping call:DK5EN-99 payload:30", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
-            #("!ctcping call:DK5EN-99", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
+            ("!ctcping call:DK5EN-99 payload:20 repeat:2", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
+
+            ("!ctcping call:DK5EN-99 payload:120", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
+            ("!ctcping call:DK5EN-99", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
 
             
             # Help and info
@@ -3135,12 +3364,12 @@ class CommandHandler:
             ("!CTCPING TARGET:LOCAL CALL:DK5EN-99", "DK5EN-99", True, "local", "CTCPING local execution should run locally"),
             
             # Group commands without targets
-            #("!WX", "20", False, "mesh", "Group command without target should forward to mesh"),
-            #("!TIME", "TEST", False, "mesh", "Test group command without target should forward to mesh"),
+            ("!WX", "TEST", True, "local", "Group command without target get executed locally and result is sent to group"),
+            ("!TIME", "99999", True, "local", "Test group command without target get executed locally and result is sent to group"),
             
             # Group commands with targets
-            #("!WX DK5EN-1", "20", True, "local", "Group command with our target should execute locally"),
-            #("!TIME OE1ABC-5", "20", False, "mesh", "Group command with other target should forward to mesh"),
+            ("!WX DK5EN-1", "99999", True, "local", "Group command with our target should execute locally"),
+            ("!TIME OE1ABC-5", "TEST", False, "mesh", "Group command with other target should forward to mesh"),
         ]
         
         results = []
@@ -3308,49 +3537,6 @@ class CommandHandler:
         return passed == total
 
 
-
-    
-    async def run_all_tests(self):
-        """Run complete test suite for CommandHandler"""
-        if has_console:
-            print("\n" + "="*60)
-            print("🧪 COMMAND HANDLER TEST SUITE")
-            print("="*60)
-        
-        basic_passed = self.test_reception_logic()
-        intent_passed = self.test_intent_based_reception_logic() 
-        edge_passed = await self.test_reception_edge_cases()
-        kickban_passed = await self.test_kickban_logic()
-        blocking_passed = self.test_message_blocking_integration()
-        topic_passed = await self.test_topic_logic()
-        ctcping_passed = await self.test_ctcping_logic()  # NEUE ZEILE
-
-
-        self_exec_passed = await self.test_self_command_execution()
-        self_suppress_passed = await self.test_self_command_suppression_logic()
-
-        remote_exec_passed = await self.test_remote_command_execution()  # NEW
-    
-        total_passed = all([
-            basic_passed, intent_passed, edge_passed, kickban_passed, 
-            blocking_passed, topic_passed, ctcping_passed,
-            self_exec_passed, self_suppress_passed, remote_exec_passed  # ADD THIS
-        ])  
-
-        if has_console:
-            if total_passed:
-                print("\n🎉 ALL COMMAND HANDLER TESTS PASSED!")
-            else:
-                print("\n⚠️ SOME COMMAND HANDLER TESTS FAILED!")
-            print("="*60)
-        
-        return total_passed
-
-
-
-
-
-
     async def test_topic_logic(self):
         """Test topic/beacon functionality"""
         if has_console:
@@ -3486,10 +3672,146 @@ class CommandHandler:
             if group in self.active_topics:
                 await self._stop_topic_beacon(group)
 
+    
+    async def test_incoming_personal_commands(self):
+        """Test incoming personal commands from other stations"""
+        if has_console:
+            print("\n🧪 Testing Incoming Personal Commands:")
+            print("=" * 50)
+        
+        # Test cases: (src, dst, command, should_execute, expected_type, description)
+        test_cases = [
+            # Direct commands to us with our target - should execute
+            ("DK5EN-99", self.my_callsign, f"!WX {self.my_callsign}", True, 'direct', "Weather request with our target should execute"),
+            ("DK5EN-99", self.my_callsign, f"!TIME {self.my_callsign}", True, 'direct', "Time request with our target should execute"),
+            ("DK5EN-99", self.my_callsign, f"!DICE {self.my_callsign}", True, 'direct', "Dice request with our target should execute"),
+            ("DL2JA-1", self.my_callsign, f"!STATS {self.my_callsign}", True, 'direct', "Stats request with our target should execute"),
+            ("DK5EN-99", self.my_callsign, f"!SEARCH CALL:DK5EN-1 {self.my_callsign}", True, 'direct', "Search request with our target should execute"),
+            ("DK5EN-99", self.my_callsign, f"!POS CALL:DB0ED-99 {self.my_callsign}", True, 'direct', "Position request with our target should execute"),
+            ("DK5EN-99", self.my_callsign, f"!MHEARD LIMIT:5 {self.my_callsign}", True, 'direct', "MHeard request with our target should execute"),
+            ("DK5EN-99", self.my_callsign, f"!USERINFO {self.my_callsign}", True, 'direct', "UserInfo request with our target should execute"),
+            
+            # Direct commands to us without target - should NOT execute
+            ("DK5EN-99", self.my_callsign, "!WX", False, None, "Weather request without target should not execute"),
+            ("DK5EN-99", self.my_callsign, "!TIME", False, None, "Time request without target should not execute"),
+            ("DK5EN-99", self.my_callsign, "!DICE", False, None, "Dice request without target should not execute"),
+            ("DK5EN-99", self.my_callsign, "!STATS", False, None, "Stats request without target should not execute"),
+            
+            # Direct commands to us with other target - should NOT execute
+            ("DK5EN-99", self.my_callsign, "!WX OE5HWN-12", False, None, "Weather request with other target should not execute"),
+            ("DK5EN-99", self.my_callsign, "!TIME OE5HWN-12", False, None, "Time request with other target should not execute"),
+            ("DK5EN-99", self.my_callsign, "!DICE OE5HWN-12", False, None, "Dice request with other target should not execute"),
+            
+            # CTCPING commands to us
+            ("DK5EN-99", self.my_callsign, f"!CTCPING TARGET:{self.my_callsign} CALL:W1XYZ-1", True, 'direct', "CTCPING with our target should execute"),
+            ("DK5EN-99", self.my_callsign, f"!CTCPING CALL:DK5EN-99 {self.my_callsign}", True, 'direct', "CTCPING with our target at end should execute"),
+            ("DK5EN-99", self.my_callsign, "!CTCPING TARGET:OE5HWN-12 CALL:DK5EN-1", False, None, "CTCPING with other target should not execute"),
+            
+            # Commands from us to others (should execute locally and send the result to our parter)
+            (self.my_callsign, "DK5EN-99", "!WX", True, 'direct', "Our weather command to others should execute locally and send result"),
+            (self.my_callsign, "DK5EN-99", f"!TIME {self.my_callsign}", True, 'direct', "Our time command with our target should execute locally and send result"),
+            (self.my_callsign, "OE1ABC-5", "!DICE", True, 'direct', "Our dice command to others should execute locally and send result"),
+            (self.my_callsign, "W1XYZ-1", "!STATS", True, 'direct', "Our stats command to others should execute locally and send result")
+        ]
+        
+        results = []
+        
+        for src, dst, command, should_execute, expected_type, description in test_cases:
+            try:
+                if has_console:
+                    print(f"\n🔄 Testing: {src} → {dst}: {command}")
+                
+                # Check if command should execute
+                should_execute_actual, target_type = self._should_execute_command(src, dst, command)
+                
+                # Check execution decision
+                exec_match = should_execute_actual == should_execute
+                type_match = target_type == expected_type
+                
+                overall_pass = exec_match and type_match
+                status = "✅ PASS" if overall_pass else "❌ FAIL"
+                
+                results.append((status, description, overall_pass))
+                
+                if has_console:
+                    print(f"{status} | {description}")
+                    print(f"     From: {src} → To: {dst}")
+                    print(f"     Command: {command}")
+                    print(f"     Expected: Execute={should_execute}, Type={expected_type}")
+                    print(f"     Actual: Execute={should_execute_actual}, Type={target_type}")
+                    if not overall_pass:
+                        if not exec_match:
+                            print(f"     ❌ Execution mismatch: got {should_execute_actual}, expected {should_execute}")
+                        if not type_match:
+                            print(f"     ❌ Type mismatch: got {target_type}, expected {expected_type}")
+                    print()
+            
+            except Exception as e:
+                status = "❌ ERROR"
+                results.append((status, description, False))
+                if has_console:
+                    print(f"❌ ERROR | {description}")
+                    print(f"     Command: {command}")
+                    print(f"     Exception: {e}")
+                    print()
+        
+        # Summary
+        passed = sum(1 for r in results if r[2])
+        total = len(results)
+        
+        if has_console:
+            print(f"🧪 Incoming Personal Commands Summary: {passed}/{total} tests passed")
+            if passed == total:
+                print("🎉 All incoming personal command tests passed!")
+            else:
+                print("⚠️ Some incoming personal command tests failed!")
+                
+                # Show failed tests
+                failed_tests = [r for r in results if not r[2]]
+                if failed_tests:
+                    print("\n❌ Failed Tests:")
+                    for status, description, _ in failed_tests:
+                        print(f"   • {description}")
+            
+            print("=" * 50)
+        
+        return passed == total
 
-
-
-
+    
+    async def run_all_tests(self):
+        """Run complete test suite for CommandHandler"""
+        if has_console:
+            print("\n" + "="*60)
+            print("🧪 COMMAND HANDLER TEST SUITE")
+            print("="*60)
+        
+        basic_passed = self.test_reception_logic()
+        intent_passed = self.test_intent_based_reception_logic() 
+        edge_passed = await self.test_reception_edge_cases()
+        kickban_passed = await self.test_kickban_logic()
+        blocking_passed = self.test_message_blocking_integration()
+        topic_passed = await self.test_topic_logic()
+        ctcping_passed = await self.test_ctcping_logic()
+        self_exec_passed = await self.test_self_command_execution()
+        self_suppress_passed = await self.test_self_command_suppression_logic()
+        remote_exec_passed = await self.test_remote_command_execution()
+        incoming_personal_passed = await self.test_incoming_personal_commands()  # NEU
+        
+        total_passed = all([
+            basic_passed, intent_passed, edge_passed, kickban_passed, 
+            blocking_passed, topic_passed, ctcping_passed,
+            self_exec_passed, self_suppress_passed, remote_exec_passed,
+            incoming_personal_passed  # HINZUFÜGEN
+        ]) 
+        
+        if has_console:
+            if total_passed:
+                print("\n🎉 ALL COMMAND HANDLER TESTS PASSED!")
+            else:
+                print("\n⚠️ SOME COMMAND HANDLER TESTS FAILED!")
+            print("="*60)
+        
+        return total_passed
 
 
 # Integration function for your main script
