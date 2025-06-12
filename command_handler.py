@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from meteo import WeatherService
 from typing import Dict, Optional
 
-VERSION="v0.53.0"
+VERSION="v0.54.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -525,7 +525,7 @@ class CommandHandler:
         # Pattern: "CALLSIGN :ackXXX" or "CALLSIGN  :ackXXX" (allow multiple spaces)
         pattern = r'\s+:ack\d{3}$'
         result = bool(re.search(pattern, msg))
-        print(f"🔍 ACK check: '{msg}' -> {result} pattern:{pattern}")
+        #print(f"🔍 ACK check: '{msg}' -> {result} pattern:{pattern}")
         return result
 
 
@@ -736,7 +736,7 @@ class CommandHandler:
         # Check for {xxx} pattern at the end
         pattern = r'\{\d{3}$'  # Exactly 3 digits after {
         result = bool(re.search(pattern, msg))
-        print(f"🔍 Echo check: '{msg}' -> {pattern}, result:{result}")
+        #print(f"🔍 Echo check: '{msg}' -> {pattern}, result:{result}")
 
         return result
 

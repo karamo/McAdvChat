@@ -11,7 +11,7 @@ from ble_handler import (
 
 from command_handler import create_command_handler
 
-VERSION="v0.49.0"
+VERSION="v0.50.0"
 
 #### debug
 import signal
@@ -1006,16 +1006,14 @@ async def main():
 
 
 ########### debug
-
-
-    signal.signal(signal.SIGUSR1, debug_signal_handler)
-    print("🔍 DEBUG: Send 'kill -USR1 <pid>' to get stack trace")
-
-
+#
+#
+#    signal.signal(signal.SIGUSR1, debug_signal_handler)
+#    print("🔍 DEBUG: Send 'kill -USR1 <pid>' to get stack trace")
+#
+#
 ########### debug
 
-
-### unit tests
 
     suppression_passed = True  # Default values
     command_handler_passed = True
