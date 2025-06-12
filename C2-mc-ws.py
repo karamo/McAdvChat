@@ -1104,7 +1104,6 @@ if __name__ == "__main__":
 
     USER_INFO_TEXT = config.get("USER_INFO_TEXT")
 
-
     UDP_PORT_list = config["UDP_PORT_list"]
     UDP_PORT_send = config["UDP_PORT_send"]
 
