@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from meteo import WeatherService
 from typing import Dict, Optional
 
-VERSION="v0.54.0"
+VERSION="v0.55.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -744,14 +744,13 @@ class CommandHandler:
 
     async def _handle_echo_message(self, message_data: dict):
         """Handle echo message and start tracking for ACK"""
-        print(f"🔍 ENTERING _handle_echo_message with: {message_data}")
         try:
             src = message_data.get('src', '').upper()
             dst = message_data.get('dst', '').upper()  
             msg = message_data.get('msg', '')
 
-            print(f"🔍 Echo processing: src={src}, dst={dst}, msg='{msg[:30]}...'")
-        
+            if has_console:
+                print(f"🔍 Echo processing: src={src}, dst={dst}, msg='{msg[:30]}...'")
             
             # Extract message ID from {xxx} suffix
             match = re.search(r'\{(\d{3})$', msg)
