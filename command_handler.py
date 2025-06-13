@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from meteo import WeatherService
 from typing import Dict, Optional
 
-VERSION="v0.55.0"
+VERSION="v0.56.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -24,6 +24,8 @@ COMMAND_THROTTLING = {
     'dice': 5,      # 5 seconds for dice games
     'time': 5,      # 5 seconds for time requests
     'group': 5,
+    'kb': 5,
+    'topic': 5,
     # All other commands use default 5 minutes
 }
 
@@ -452,10 +454,21 @@ class CommandHandler:
             print(f"📋 CommandHandler: Executing {target_type} command{admin_status}{group_status}")
 
         # Determine response target
+        #if target_type == 'direct':
+        #    response_target = src  # Reply to sender
+        #else:
+        #    response_target = dst  # Reply to group
+
         if target_type == 'direct':
-            response_target = src  # Reply to sender
+            if src == self.my_callsign:
+                # Outgoing: Antwort an Chat-Partner
+                response_target = dst
+            else:
+                # Incoming: Antwort an Sender
+                response_target = src
         else:
-            response_target = dst  # Reply to group
+            # Group: Antwort an Gruppe
+            response_target = dst
         
         if has_console:
             print(f"📋 CommandHandler: Response will be sent to {response_target} ({target_type})")
@@ -642,91 +655,6 @@ class CommandHandler:
 
 
 
-    async def _handle_ack_message_old(self, message_data: dict):
-        """Handle ACK message and calculate RTT"""
-        try:
-            src_raw = message_data.get('src', '').upper()
-            dst = message_data.get('dst', '').upper()
-            msg = message_data.get('msg', '')
-
-            src = src_raw.split(',')[0].strip() if ',' in src_raw else src_raw.strip()
-        
-            if has_console:
-                if ',' in src_raw:
-                    print(f"🏓 ACK path processing: '{src_raw}' → originator: '{src}'")
-            
-            # Extract ACK ID from message
-            # Format: "DK5EN-1 :ack753" or "DK5EN-1  :ack753"
-            match = re.search(r'\s+:ack(\d{3})$', msg)
-            if not match:
-                return
-            
-            ack_id = match.group(1)  # e.g., "753"
-            
-            # Check if we have a matching ping
-            if ack_id not in self.active_pings:
-                if has_console:
-                    print(f"🏓 Received ACK {ack_id} from {src}, but no matching ping found")
-                return
-            
-            ping_info = self.active_pings[ack_id]
-            
-            # Verify the ACK comes from the expected target
-            if src != ping_info['target'] or dst != self.my_callsign:
-                if has_console:
-                    print(f"🏓 ACK {ack_id} from {src} or {dst}, but expected from {ping_info['target']}")
-                    print(f"🏓 ACK {ack_id} not directed to us (dst={dst})")
-                return
-            
-            # Calculate RTT
-            receive_time = time.time()
-            sent_time = ping_info['sent_time']
-            rtt = receive_time - sent_time
-
-            # Create individual result
-            individual_result = {
-                'sequence': ping_info.get('sequence_info', ''),
-                'rtt': rtt,
-                'status': 'success',
-                'timestamp': receive_time
-            }
-
-            test_id = ping_info.get('test_id')
-
-            if test_id and test_id in self.ping_tests:
-                test_summary = self.ping_tests[test_id]
-                test_summary['results'].append(individual_result)
-                test_summary['completed'] += 1
-
-            
-            # Remove from active pings (ACK received)
-            del self.active_pings[ack_id]
-            
-            # Send result to requester
-            target = ping_info['target']
-            requester = ping_info['requester']
-
-            # Create result message
-            rtt_ms = rtt * 1000  # Convert to milliseconds
-
-            result_msg = f"🏓 Ping to {target}: RTT = {rtt_ms:.1f}ms"
-            if ping_info.get('sequence_info'):
-                result_msg = f"🏓 Ping {ping_info['sequence_info']} to {target}: RTT = {rtt_ms:.1f}ms"
-        
-            
-            await self._send_ping_result(requester, result_msg)
-            
-            if has_console:
-                print(f"🏓 ACK received: ID={ack_id}, target={target}, RTT={rtt_ms:.1f}ms")
-                
-        except Exception as e:
-            if has_console:
-                print(f"❌ Error handling ACK message: {e}")
-
-
-
-
-
 
     def _is_echo_message(self, msg: str) -> bool:
         """Check if message is an echo with {xxx} suffix"""
@@ -874,57 +802,6 @@ class CommandHandler:
 
 
     
-    async def _ping_timeout_task_old(self, message_id: str):
-        """Handle ping timeout after 30 seconds"""
-        try:
-            await asyncio.sleep(self.ping_timeout)  # 30 seconds
-            
-            # Check if ping is still active (not received ACK)
-            if message_id in self.active_pings:
-                ping_info = self.active_pings[message_id]
-                
-                if ping_info['status'] == 'waiting_ack':
-                    # Timeout occurred
-                    target = ping_info['target']
-                    requester = ping_info['requester']
-                    sequence_info = ping_info.get('sequence_info', '')
-                    test_id = ping_info.get('test_id')
-
-                    # Update test summary
-                    if test_id and test_id in self.ping_tests:
-                        test_summary = self.ping_tests[test_id]
-                        test_summary['timeouts'] += 1
-                    
-                        # Add timeout result
-                        timeout_result = {
-                            'sequence': sequence_info,
-                            'rtt': None,
-                            'status': 'timeout',
-                            'timestamp': time.time()
-                        }
-                        test_summary['results'].append(timeout_result)
-                    
-                    # Remove from active pings
-                    del self.active_pings[message_id]
-                    
-                    # Send timeout result
-                    seq_text = f" {sequence_info}" if sequence_info else ""
-                
-                    timeout_msg = f"🏓 Ping to {target}: timeout (no ACK received after 30s)"
-                    await self._send_ping_result(requester, timeout_msg)
-                    
-                    if has_console:
-                        print(f"⏰ Ping timeout: ID={message_id}, target={target}{seq_text}")
-                    
-                        
-        except asyncio.CancelledError:
-            # Task was cancelled (probably because ACK was received)
-            pass
-        except Exception as e:
-            if has_console:
-                print(f"❌ Error in ping timeout task: {e}")
-
-
 
     def _find_test_id_for_target(self, target: str) -> Optional[str]:
         """Find active test ID for target"""
@@ -2384,7 +2261,7 @@ class CommandHandler:
             if not user_info:
                 return "❌ User info not configured"
                 
-            return f"ℹ️ {user_info}"
+            return f"{user_info}"
             
         except Exception as e:
             return f"❌ Error retrieving user info: {str(e)[:30]}"
@@ -2615,8 +2492,8 @@ class CommandHandler:
         if not text:
             return "❌ Beacon text required"
         
-        if len(text) > 200:
-            return "❌ Beacon text too long (max 200 chars)"
+        if len(text) > 120:
+            return "❌ Beacon text too long (max 120 chars)"
         
         try:
             interval = int(interval)
@@ -3238,12 +3115,12 @@ class CommandHandler:
             ("!POS CALL:DK5EN-1", ["🔍", "DK5EN-1"], "Position search should return position data"),
             
             # Network commands - temporary disabled
-            ("!ctcping target:DK5EN-1 call:DK5EN-99 payload:80 repeat:1", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
+            #("!ctcping target:DK5EN-1 call:DK5EN-99 payload:80 repeat:1", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
 
-            ("!ctcping call:DK5EN-99 payload:20 repeat:2", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
+            #("!ctcping call:DK5EN-99 payload:20 repeat:2", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
 
-            ("!ctcping call:DK5EN-99 payload:120", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
-            ("!ctcping call:DK5EN-99", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
+            #("!ctcping call:DK5EN-99 payload:120", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
+            #("!ctcping call:DK5EN-99", ["🏓", "Ping test", "DK5EN-99", "started"], "CTC Ping should start ping test"),
 
             
             # Help and info
@@ -3671,8 +3548,155 @@ class CommandHandler:
             if group in self.active_topics:
                 await self._stop_topic_beacon(group)
 
+
     
     async def test_incoming_personal_commands(self):
+       """Test incoming personal commands from other stations and outgoing commands to chat partners"""
+       if has_console:
+           print("\n🧪 Testing Personal Commands (Incoming & Outgoing):")
+           print("=" * 60)
+       
+       # Test cases: (src, dst, command, should_execute, expected_type, expected_response_dst, description)
+       test_cases = [
+           # === INCOMING COMMANDS (from others to us) ===
+           # Direct commands to us with our target - should execute
+           ("DK5EN-99", self.my_callsign, f"!WX {self.my_callsign}", True, 'direct', "DK5EN-99", "Weather request with our target should execute"),
+           ("DK5EN-99", self.my_callsign, f"!TIME {self.my_callsign}", True, 'direct', "DK5EN-99", "Time request with our target should execute"),
+           ("DK5EN-99", self.my_callsign, f"!DICE {self.my_callsign}", True, 'direct', "DK5EN-99", "Dice request with our target should execute"),
+           ("DL2JA-1", self.my_callsign, f"!STATS {self.my_callsign}", True, 'direct', "DL2JA-1", "Stats request with our target should execute"),
+           ("DK5EN-99", self.my_callsign, f"!SEARCH CALL:DK5EN-1 {self.my_callsign}", True, 'direct', "DK5EN-99", "Search request with our target should execute"),
+           ("DK5EN-99", self.my_callsign, f"!POS CALL:DB0ED-99 {self.my_callsign}", True, 'direct', "DK5EN-99", "Position request with our target should execute"),
+           ("DK5EN-99", self.my_callsign, f"!MHEARD LIMIT:5 {self.my_callsign}", True, 'direct', "DK5EN-99", "MHeard request with our target should execute"),
+           ("DK5EN-99", self.my_callsign, f"!USERINFO {self.my_callsign}", True, 'direct', "DK5EN-99", "UserInfo request with our target should execute"),
+           
+           # Direct commands to us without target - should NOT execute
+           ("DK5EN-99", self.my_callsign, "!WX", False, None, None, "Weather request without target should not execute"),
+           ("DK5EN-99", self.my_callsign, "!TIME", False, None, None, "Time request without target should not execute"),
+           ("DK5EN-99", self.my_callsign, "!DICE", False, None, None, "Dice request without target should not execute"),
+           ("DK5EN-99", self.my_callsign, "!STATS", False, None, None, "Stats request without target should not execute"),
+           
+           # Direct commands to us with other target - should NOT execute
+           ("DK5EN-99", self.my_callsign, "!WX OE5HWN-12", False, None, None, "Weather request with other target should not execute"),
+           ("DK5EN-99", self.my_callsign, "!TIME OE5HWN-12", False, None, None, "Time request with other target should not execute"),
+           ("DK5EN-99", self.my_callsign, "!DICE OE5HWN-12", False, None, None, "Dice request with other target should not execute"),
+           
+           # CTCPING commands to us
+           ("DK5EN-99", self.my_callsign, f"!CTCPING TARGET:{self.my_callsign} CALL:W1XYZ-1", True, 'direct', "DK5EN-99", "CTCPING with our target should execute"),
+           ("DK5EN-99", self.my_callsign, f"!CTCPING CALL:DK5EN-99 {self.my_callsign}", True, 'direct', "DK5EN-99", "CTCPING with our target at end should execute"),
+           ("DK5EN-99", self.my_callsign, "!CTCPING TARGET:OE5HWN-12 CALL:DK5EN-1", False, None, None, "CTCPING with other target should not execute"),
+           
+           # === OUTGOING COMMANDS (from us to chat partners) ===
+           # Commands from us to others (should execute locally and send result to chat partner)
+           (self.my_callsign, "OE5HWN-12", "!WX", True, 'direct', "OE5HWN-12", "Our weather command to chat partner should execute locally and send result to partner"),
+           (self.my_callsign, "OE5HWN-12", "!TIME", True, 'direct', "OE5HWN-12", "Our time command to chat partner should execute locally and send result to partner"),
+           (self.my_callsign, "OE5HWN-12", "!DICE", True, 'direct', "OE5HWN-12", "Our dice command to chat partner should execute locally and send result to partner"),
+           (self.my_callsign, "OE5HWN-12", "!STATS", True, 'direct', "OE5HWN-12", "Our stats command to chat partner should execute locally and send result to partner"),
+           (self.my_callsign, "OE5HWN-12", "!USERINFO", True, 'direct', "OE5HWN-12", "Our userinfo to chat partner should execute locally and send result to partner"),
+           (self.my_callsign, "OE5HWN-12", "!SEARCH CALL:DK5EN-1", True, 'direct', "OE5HWN-12", "Our search command to chat partner should execute locally and send result to partner"),
+           (self.my_callsign, "OE5HWN-12", "!MHEARD LIMIT:3", True, 'direct', "OE5HWN-12", "Our mheard command to chat partner should execute locally and send result to partner"),
+           (self.my_callsign, "DK5EN-99", "!WX", True, 'direct', "DK5EN-99", "Our weather command to DK5EN-99 should execute locally and send result to partner"),
+           (self.my_callsign, "OE1ABC-5", "!DICE", True, 'direct', "OE1ABC-5", "Our dice command to OE1ABC-5 should execute locally and send result to partner"),
+           (self.my_callsign, "W1XYZ-1", "!STATS", True, 'direct', "W1XYZ-1", "Our stats command to W1XYZ-1 should execute locally and send result to partner"),
+           
+           # === OUTGOING COMMANDS WITH TARGETS (should execute locally if target is us) ===
+           (self.my_callsign, "OE5HWN-12", f"!TIME {self.my_callsign}", True, 'direct', "OE5HWN-12", "Our time command with our target should execute locally and send result to partner"),
+           (self.my_callsign, "DK5EN-99", f"!WX {self.my_callsign}", True, 'direct', "DK5EN-99", "Our weather command with our target should execute locally and send result to partner"),
+           
+           # === OUTGOING COMMANDS WITH OTHER TARGETS (should NOT execute locally) ===
+           (self.my_callsign, "OE5HWN-12", "!TIME OE5HWN-12", False, None, None, "Our time command with partner's target should not execute locally (remote intent)"),
+           (self.my_callsign, "DK5EN-99", "!WX DK5EN-99", False, None, None, "Our weather command with DK5EN-99 target should not execute locally (remote intent)"),
+           (self.my_callsign, "OE1ABC-5", "!DICE OE1ABC-5", False, None, None, "Our dice command with OE1ABC-5 target should not execute locally (remote intent)")
+       ]
+       
+       results = []
+       
+       for src, dst, command, should_execute, expected_type, expected_response_dst, description in test_cases:
+           try:
+               if has_console:
+                   print(f"\n🔄 Testing: {src} → {dst}: {command}")
+               
+               # Check if command should execute
+               should_execute_actual, target_type = self._should_execute_command(src, dst, command)
+               
+               # Check execution decision
+               exec_match = should_execute_actual == should_execute
+               type_match = target_type == expected_type
+               
+               # Determine expected response target using the corrected logic
+               if should_execute and target_type == 'direct':
+                   if src == self.my_callsign:
+                       # Outgoing: response goes to chat partner (dst)
+                       actual_response_target = dst
+                   else:
+                       # Incoming: response goes back to sender (src)
+                       actual_response_target = src
+               elif should_execute and target_type == 'group':
+                   # Group: response goes to group (dst)
+                   actual_response_target = dst
+               else:
+                   # Not executed: no response target
+                   actual_response_target = None
+               
+               # Check response target
+               response_match = actual_response_target == expected_response_dst
+               
+               overall_pass = exec_match and type_match and response_match
+               status = "✅ PASS" if overall_pass else "❌ FAIL"
+               
+               results.append((status, description, overall_pass))
+               
+               if has_console:
+                   direction = "OUTGOING" if src == self.my_callsign else "INCOMING"
+                   print(f"{status} | {description}")
+                   print(f"     Direction: {direction}")
+                   print(f"     From: {src} → To: {dst}")
+                   print(f"     Command: {command}")
+                   print(f"     Expected: Execute={should_execute}, Type={expected_type}, Response→{expected_response_dst}")
+                   print(f"     Actual: Execute={should_execute_actual}, Type={target_type}, Response→{actual_response_target}")
+                   if not overall_pass:
+                       if not exec_match:
+                           print(f"     ❌ Execution mismatch: got {should_execute_actual}, expected {should_execute}")
+                       if not type_match:
+                           print(f"     ❌ Type mismatch: got {target_type}, expected {expected_type}")
+                       if not response_match:
+                           print(f"     ❌ Response target mismatch: got {actual_response_target}, expected {expected_response_dst}")
+                   print()
+           
+           except Exception as e:
+               status = "❌ ERROR"
+               results.append((status, description, False))
+               if has_console:
+                   print(f"❌ ERROR | {description}")
+                   print(f"     Command: {command}")
+                   print(f"     Exception: {e}")
+                   print()
+       
+       # Summary
+       passed = sum(1 for r in results if r[2])
+       total = len(results)
+       
+       if has_console:
+           print(f"🧪 Personal Commands Test Summary: {passed}/{total} tests passed")
+           if passed == total:
+               print("🎉 All personal command tests passed!")
+           else:
+               print("⚠️ Some personal command tests failed!")
+               
+               # Show failed tests
+               failed_tests = [r for r in results if not r[2]]
+               if failed_tests:
+                   print("\n❌ Failed Tests:")
+                   for status, description, _ in failed_tests:
+                       print(f"   • {description}")
+           
+           print("=" * 60)
+       
+       return passed == total
+
+
+
+    
+    async def test_incoming_personal_commands_old(self):
         """Test incoming personal commands from other stations"""
         if has_console:
             print("\n🧪 Testing Incoming Personal Commands:")
@@ -3794,7 +3818,7 @@ class CommandHandler:
         self_exec_passed = await self.test_self_command_execution()
         self_suppress_passed = await self.test_self_command_suppression_logic()
         remote_exec_passed = await self.test_remote_command_execution()
-        incoming_personal_passed = await self.test_incoming_personal_commands()  # NEU
+        incoming_personal_passed = await self.test_incoming_personal_commands()
         
         total_passed = all([
             basic_passed, intent_passed, edge_passed, kickban_passed, 
