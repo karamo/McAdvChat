@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from meteo import WeatherService
 from typing import Dict, Optional
 
-VERSION="v0.56.0"
+VERSION="v0.57.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -121,7 +121,7 @@ COMMANDS = {
     'ctcping': {
         'handler': 'handle_ctcping',
         'args': ['target','call', 'payload', 'repeat'],
-        'format': '!ctcping [target:CALL|local], call:TARGET payload:20 repeat:3',
+        'format': '!ctcping [target:Execution-Host|local], call:Ping-Target payload:25 repeat:3',
         'description': 'Ping test with roundtrip time measurement'
     },
     'help': {
@@ -683,21 +683,36 @@ class CommandHandler:
             # Extract message ID from {xxx} suffix
             match = re.search(r'\{(\d{3})$', msg)
             if not match:
+                if has_console:
+                    print(f"🔍 No message ID found in echo")
                 return
             
             message_id = match.group(1)  # e.g., "753"
             original_msg = msg[:-4]  # Remove {753 suffix
+
+            if has_console:
+                print(f"🔍 Echo ID: {message_id}, Original: '{original_msg}'")
             
             # Only track echoes from our own messages
             if src != self.my_callsign:
+                if has_console:
+                    print(f"🔍 Echo not from us ({src} != {self.my_callsign})")
                 return
             
             # Check if this looks like a ping message
-            if not self._is_ping_message(original_msg):
+            is_ping = self._is_ping_message(original_msg)
+            if has_console:
+                  print(f"🔍 Is ping message: {is_ping}")
+            if not is_ping:
                 return
 
             sequence_info = self._extract_sequence_info(original_msg)
             test_id = self._find_test_id_for_target(dst)
+
+            if has_console:
+                print(f"🔍 Sequence: {sequence_info}, Test ID: {test_id}")
+                print(f"🔍 Available tests: {list(self.ping_tests.keys()) if hasattr(self, 'ping_tests') else 'None'}")
+        
             
             # Store ping tracking info
             ping_info = {
@@ -715,7 +730,8 @@ class CommandHandler:
             if has_console:
                 seq_text = f" ({sequence_info})" if sequence_info else ""
             
-                print(f"🏓 Echo received: ID={message_id}, target={dst}, waiting for ACK...")
+                print(f"🏓 Echo tracked: ID={message_id}, target={dst}, test_id={test_id}")
+                print(f"🔍 Active pings now: {list(self.active_pings.keys())}")
                 
             # Start timeout task
             asyncio.create_task(self._ping_timeout_task(message_id))
@@ -747,9 +763,10 @@ class CommandHandler:
         # Must contain "ping test" AND measurement-related terms
         has_ping_test = "ping test" in msg_lower
         has_measurement = any(term in msg_lower for term in [
-            "to measure roundtrip",
-            "measure round trip", 
-            "roundtrip"
+            "to",
+            "mea",
+            "measure", 
+            "roundtrip",
         ])
 
         return has_ping_test and has_measurement
@@ -805,9 +822,18 @@ class CommandHandler:
 
     def _find_test_id_for_target(self, target: str) -> Optional[str]:
         """Find active test ID for target"""
+        if has_console:
+                print(f"🔍 Looking for test with target='{target}'")
+                print(f"🔍 Available tests: {list(self.ping_tests.keys())}")
+                for tid, info in self.ping_tests.items():
+                    print(f"🔍   Test {tid}: target='{info['target']}', status='{info['status']}'")
+    
         for test_id, test_info in self.ping_tests.items():
             if test_info['target'] == target and test_info['status'] == 'running':
                 return test_id
+
+        if has_console:
+            print(f"🔍 No matching test found for target '{target}'")
         return None
 
     
@@ -1196,7 +1222,10 @@ class CommandHandler:
 
 
                 elif cmd == 'ctcping' and not kwargs:
-                    # Handle ctcping arguments: !ctcping target:CALL call:TARGET payload:20 repeat:3
+                    # Handle ctcping arguments: !ctcping target:OE5HWN-12 call:OE1ABC payload:25 repeat:3
+                    # target: Ausführungs-Knoten (wo läuft der Befehl)
+                    # target is None oder "local" für lokale Ausführung
+                    # call: Ping-Ziel (wer wird gepingt = dst der Ping-Message)
                     for part in parts[1:]:
                         if ':' in part:
                             key, value = part.split(':', 1)
@@ -1205,7 +1234,6 @@ class CommandHandler:
                                 kwargs['target'] = value.upper() if value.upper() != 'LOCAL' else 'local'
                             elif key == 'call':
                                 kwargs['call'] = value.upper()
-
 
                 elif cmd == 'topic' and not kwargs:
                     # Handle topic arguments: !topic [group] [text] [interval] | !topic delete group
@@ -1288,9 +1316,9 @@ class CommandHandler:
     
     async def handle_ctcping(self, kwargs, requester):
         """Handle CTC ping test with roundtrip time measurement"""
-        target_node = kwargs.get('target', 'local')
+        target_node = kwargs.get('target', 'local') # WHERE it gets executed
         ping_target = kwargs.get('call', '').upper()  # WHO gets pinged
-        payload_size = kwargs.get('payload', 20)
+        payload_size = kwargs.get('payload', 25)
         repeat_count = kwargs.get('repeat', 1)
         
         if not ping_target:
@@ -1317,8 +1345,8 @@ class CommandHandler:
         # Validate payload and repeat parameters
         try:
             payload_size = int(payload_size)
-            if payload_size < 1 or payload_size > 140:
-                return "❌ Payload size must be between 1 and 140 bytes"
+            if payload_size < 25 or payload_size > 140:
+                return "❌ Payload size must be between 25 and 140 bytes"
         except (ValueError, TypeError):
             return "❌ Invalid payload size"
         
@@ -1808,13 +1836,24 @@ class CommandHandler:
                 results = test_summary['results']
                 total_pings = test_summary['total_pings']
 
-                # Filter out None RTT values (timeouts)
-                successful_rtts = [r['rtt'] for r in results if r['rtt'] is not None]
-                successful = len(results)
+                # Count successes from results
+                successful_from_results = len([r for r in results if r['rtt'] is not None])
+                timeouts_from_results = len([r for r in results if r['rtt'] is None])
+
+                # Use tracked counters
+                successful = test_summary['completed']
                 timeouts = test_summary['timeouts']
 
-                loss_percent = int(((total_pings - successful) / total_pings) * 100)
-                
+                # Verify consistency
+                if successful != successful_from_results or timeouts != timeouts_from_results:
+                    if has_console:
+                        print(f"⚠️ Ping summary inconsistency detected!")
+                        print(f"   Results: {successful_from_results} success, {timeouts_from_results} timeouts")
+                        print(f"   Tracked: {successful} success, {timeouts} timeouts")
+
+                loss_percent = int((timeouts / total_pings) * 100)
+
+
                 target = test_summary['target']
                 payload_size = test_summary['payload_size']
                 
@@ -3125,7 +3164,7 @@ class CommandHandler:
             
             # Help and info
             ("!HELP", ["📋", "Available commands"], "Help command should return command list"),
-            ("!USERINFO", ["ℹ️"], "User info should return node information"),
+            ("!USERINFO", ["Node"], "User info should return node information"),
         ]
         
         results = []
