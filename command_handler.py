@@ -1857,7 +1857,11 @@ class CommandHandler:
                 target = test_summary['target']
                 payload_size = test_summary['payload_size']
                 
-                if successful > 0 and successful_rtts:
+                if successful > 0:
+                     results = test_summary['results']
+                     successful_rtts = [r['rtt'] for r in results if r['rtt'] is not None]
+                
+                     if successful_rtts:
                         min_rtt = min(successful_rtts) * 1000
                         max_rtt = max(successful_rtts) * 1000
                         avg_rtt = (sum(successful_rtts) / len(successful_rtts)) * 1000
