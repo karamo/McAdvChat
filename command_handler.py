@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from meteo import WeatherService
 from typing import Dict, Optional
 
-VERSION="v0.57.0"
+VERSION="v0.58.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -543,7 +543,249 @@ class CommandHandler:
 
 
     
+    async def _complete_test(self, test_id: str):
+        """Complete a test: cancel monitor, send summary, cleanup (idempotent with event coordination)"""
+        try:
+            if test_id not in self.ping_tests:
+                if has_console:
+                    print(f"🧹 Test {test_id} already completed and cleaned up")
+                return
+            
+            test_summary = self.ping_tests[test_id]
+            
+            # Check if already completed or completing
+            if test_summary['status'] != 'running':
+                if has_console:
+                    print(f"🧹 Test {test_id} already in status '{test_summary['status']}'")
+                return
+            
+            # Atomic state transition to prevent race condition
+            test_summary['status'] = 'completing'
+            
+            # Cancel monitor task if it exists and is running
+            monitor_task = test_summary.get('monitor_task')
+            if monitor_task and not monitor_task.done():
+                if has_console:
+                    print(f"🧹 Cancelling monitor task for {test_id}")
+                monitor_task.cancel()
+                try:
+                    await monitor_task
+                except asyncio.CancelledError:
+                    pass  # Expected
+            
+            # Mark as completed and send summary
+            test_summary['status'] = 'completed'
+            test_summary['end_time'] = time.time()
+            
+            await self._send_test_summary(test_id)
+            
+        except Exception as e:
+            if has_console:
+                print(f"❌ Error completing test {test_id}: {e}")
+    
+    
     async def _handle_ack_message(self, message_data: dict):
+        """Handle ACK message and calculate RTT with idempotent processing"""
+        try:
+            src_raw = message_data.get('src', '').upper()
+            dst = message_data.get('dst', '').upper()
+            msg = message_data.get('msg', '')
+    
+            src = src_raw.split(',')[0].strip() if ',' in src_raw else src_raw.strip()
+    
+            if has_console:
+                if ',' in src_raw:
+                    print(f"🏓 ACK path processing: '{src_raw}' → originator: '{src}'")
+            
+            # Extract ACK ID from message
+            # Format: "DK5EN-1 :ack753" or "DK5EN-1  :ack753"
+            match = re.search(r'\s+:ack(\d{3})$', msg)
+            if not match:
+                return
+            
+            ack_id = match.group(1)
+            
+            # Check if we have a matching ping
+            if ack_id not in self.active_pings:
+                if has_console:
+                    print(f"🏓 Received ACK {ack_id} from {src}, but no matching ping found")
+                return
+            
+            ping_info = self.active_pings[ack_id]
+            
+            # Idempotent check: prevent duplicate ACK processing
+            if ping_info.get('ack_processed', False):
+                if has_console:
+                    print(f"🏓 ACK {ack_id} already processed, ignoring duplicate")
+                return
+            
+            # Verify the ACK comes from the expected target
+            if src != ping_info['target'] or dst != self.my_callsign:
+                if has_console:
+                    print(f"🏓 ACK {ack_id} verification failed: src={src}, expected={ping_info['target']}")
+                return
+            
+            # Mark as processed atomically (prevents race condition)
+            ping_info['ack_processed'] = True
+            
+            # Calculate RTT and create result
+            receive_time = time.time()
+            sent_time = ping_info['sent_time']
+            rtt = receive_time - sent_time
+    
+            result = {
+                'sequence': ping_info.get('sequence_info', ''),
+                'rtt': rtt,
+                'status': 'success',
+                'timestamp': receive_time
+            }
+            
+            test_id = ping_info.get('test_id')
+            
+            # Event-based coordination: Only proceed if test is still active
+            if test_id and test_id in self.ping_tests:
+                test_summary = self.ping_tests[test_id]
+                
+                # Only process if test is still running
+                if test_summary['status'] == 'running':
+                    # Record result atomically
+                    test_summary['results'].append(result)
+                    test_summary['completed'] += 1
+                    
+                    # Check if this completes the test
+                    total_completed = test_summary['completed'] + test_summary['timeouts']
+                    test_completed = total_completed >= test_summary['total_pings']
+                    
+                    # Send individual result only if test is still running
+                    rtt_ms = rtt * 1000
+                    result_msg = f"🏓 Ping {result['sequence']} to {ping_info['target']}: RTT = {rtt_ms:.1f}ms"
+                    await self._send_ping_result(ping_info['requester'], result_msg)
+                    
+                    if has_console:
+                        print(f"🏓 ACK processed: ID={ack_id}, RTT={rtt*1000:.1f}ms, Test complete: {test_completed}")
+                    
+                    # Trigger completion if test is done
+                    if test_completed:
+                        # Use event coordination to ensure single completion
+                        completion_event_key = f"completion_{test_id}"
+                        if not hasattr(self, '_completion_events'):
+                            self._completion_events = {}
+                        
+                        # Only first completion attempt sets the event
+                        if completion_event_key not in self._completion_events:
+                            self._completion_events[completion_event_key] = asyncio.Event()
+                            self._completion_events[completion_event_key].set()
+                            
+                            # Schedule completion (don't await to prevent blocking)
+                            asyncio.create_task(self._complete_test_with_cleanup(test_id, completion_event_key))
+                else:
+                    if has_console:
+                        print(f"🏓 ACK {ack_id} received but test {test_id} no longer running (status: {test_summary['status']})")
+            
+            # Remove from active pings (always cleanup regardless of test status)
+            del self.active_pings[ack_id]
+                        
+        except Exception as e:
+            if has_console:
+                print(f"❌ Error handling ACK message: {e}")
+    
+    
+    async def _complete_test_with_cleanup(self, test_id: str, completion_event_key: str):
+        """Complete test and cleanup completion event"""
+        try:
+            await self._complete_test(test_id)
+        finally:
+            # Cleanup completion event
+            if hasattr(self, '_completion_events') and completion_event_key in self._completion_events:
+                del self._completion_events[completion_event_key]
+    
+    
+    async def _record_ping_result(self, test_id: str, result: dict) -> bool:
+        """Record ping result and check for test completion (updated for idempotent design)"""
+        if test_id not in self.ping_tests:
+            return False
+        
+        test_summary = self.ping_tests[test_id]
+        
+        # Only process if test is still running
+        if test_summary['status'] != 'running':
+            if has_console:
+                print(f"🔍 Test {test_id} no longer running, ignoring result")
+            return False
+        
+        # Add result to test
+        test_summary['results'].append(result)
+        
+        # Update counters based on result type (with bounds checking)
+        if result['status'] == 'success':
+            if test_summary['completed'] < test_summary['total_pings']:
+                test_summary['completed'] += 1
+        elif result['status'] == 'timeout':
+            if test_summary['timeouts'] < test_summary['total_pings']:
+                test_summary['timeouts'] += 1
+        
+        # Check if test is now complete
+        test_completed = self._check_test_completion(test_id)
+        
+        if test_completed:
+            if has_console:
+                print(f"🏓 Test {test_id} completed via {result['status']}")
+            
+            # Event-based completion coordination
+            completion_event_key = f"completion_{test_id}"
+            if not hasattr(self, '_completion_events'):
+                self._completion_events = {}
+            
+            # Only first completion attempt triggers actual completion
+            if completion_event_key not in self._completion_events:
+                self._completion_events[completion_event_key] = asyncio.Event()
+                self._completion_events[completion_event_key].set()
+                
+                # Schedule completion
+                asyncio.create_task(self._complete_test_with_cleanup(test_id, completion_event_key))
+            
+            return True
+        
+        return False
+    
+    
+    def _check_test_completion(self, test_id: str) -> bool:
+        """Check if test is complete with validation (idempotent)"""
+        if test_id not in self.ping_tests:
+            return False
+        
+        test_summary = self.ping_tests[test_id]
+        
+        # Don't re-complete already completed tests
+        if test_summary['status'] != 'running':
+            return False
+        
+        total_completed = test_summary['completed'] + test_summary['timeouts']
+        expected_total = test_summary['total_pings']
+        
+        # Validation: prevent over-completion
+        if total_completed > expected_total:
+            if has_console:
+                print(f"⚠️ Test {test_id} over-completion detected: {total_completed}/{expected_total}")
+            # Cap the counters to expected total
+            excess = total_completed - expected_total
+            if test_summary['completed'] >= excess:
+                test_summary['completed'] -= excess
+            else:
+                test_summary['timeouts'] -= excess
+            total_completed = expected_total
+        
+        is_complete = total_completed >= expected_total
+        
+        if has_console and is_complete:
+            print(f"🔍 Test {test_id} completion detected: {test_summary['completed']} success + {test_summary['timeouts']} timeouts = {total_completed}/{expected_total}")
+        
+        return is_complete
+
+
+
+    
+    async def _handle_ack_message_old(self, message_data: dict):
         """Handle ACK message and calculate RTT"""
         try:
             src_raw = message_data.get('src', '').upper()
@@ -1732,7 +1974,7 @@ class CommandHandler:
 
 
     
-    async def _complete_test(self, test_id: str):
+    async def _complete_test_old(self, test_id: str):
         """Complete a test: cancel monitor, send summary, cleanup"""
         try:
             if test_id not in self.ping_tests:
