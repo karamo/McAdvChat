@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from meteo import WeatherService
 from typing import Dict, Optional
 
-VERSION="v0.58.0"
+VERSION="v0.59.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -212,7 +212,93 @@ class CommandHandler:
             'original': message_data
         }
 
+
     def _should_execute_command(self, src, dst, msg):
+        """Simplified reception logic with P2P support"""
+        src = src.upper()
+        dst = dst.upper() 
+        msg = msg.upper()
+    
+        if has_console:
+            print(f"🔍 Command execution check: src='{src}', dst='{dst}', msg='{msg[:20]}...'")
+        
+        # Invalid destinations never execute
+        if dst in ['*', 'ALL', '']:
+            if has_console:
+                print(f"🔍 → Invalid dst '{dst}' - NO EXECUTION")
+            return False, None
+        
+        target = self.extract_target_callsign(msg)
+    
+        if src == self.my_callsign:
+            # Our own commands - existing logic remains the same
+            if not target:
+                if has_console:
+                    print(f"🔍 → Our command without target - EXECUTE (local intent)")
+                if dst == self.my_callsign:
+                    return True, 'direct'
+                elif self.is_group(dst):
+                    return True, 'group'
+                else:
+                    return True, 'direct'
+            elif target == self.my_callsign:
+                if has_console:
+                    print(f"🔍 → Our command with our target - EXECUTE (local execution)")
+                if dst == self.my_callsign:
+                    return True, 'direct'
+                elif self.is_group(dst):
+                    return True, 'group'
+                else:
+                    return True, 'direct'
+            else:
+                if has_console:
+                    print(f"🔍 → Our command with remote target '{target}' - NO EXECUTION (remote intent)")
+                return False, None
+    
+        # === INCOMING COMMANDS ===
+        
+        # Direct P2P message to us
+        if dst == self.my_callsign:
+            if not target:
+                # Personal message without target → execute (P2P intent)
+                if has_console:
+                    print(f"🔍 → P2P message without target - EXECUTE (personal chat)")
+                return True, 'direct'
+            elif target == self.my_callsign:
+                # Personal message with our target → execute
+                if has_console:
+                    print(f"🔍 → P2P message with our target - EXECUTE")
+                return True, 'direct'
+            else:
+                # Personal message with other target → don't execute
+                if has_console:
+                    print(f"🔍 → P2P message with other target '{target}' - NO EXECUTION")
+                return False, None
+        
+        # Group message → requires our callsign as target
+        if self.is_group(dst):
+            if target != self.my_callsign:
+                if has_console:
+                    print(f"🔍 → Group message without our target - NO EXECUTION")
+                return False, None
+            
+            # Group message with our target → check permissions
+            execute = self.group_responses_enabled or self._is_admin(src)
+            reason = "Groups ON" if self.group_responses_enabled else "Admin override" if self._is_admin(src) else "Groups OFF"
+            if has_console:
+                print(f"🔍 → Group '{dst}' with our target - {'EXECUTE' if execute else 'NO EXECUTION'} ({reason})")
+    
+            if execute:
+                return True, 'group'
+            else:
+                return False, None
+        
+        if has_console:
+            print(f"🔍 → No match - NO EXECUTION")
+        return False, None
+
+
+    def _should_execute_command_old(self, src, dst, msg):
         """Simplified reception logic from table"""
         src = src.upper()
         dst = dst.upper() 
@@ -228,7 +314,6 @@ class CommandHandler:
             return False, None
         
         target = self.extract_target_callsign(msg)
-
 
         if src == self.my_callsign:
             if not target:
