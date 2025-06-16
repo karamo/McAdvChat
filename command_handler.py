@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from meteo import WeatherService
 from typing import Dict, Optional
 
-VERSION="v0.59.0"
+VERSION="v0.60.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -375,7 +375,6 @@ class CommandHandler:
 
     def extract_target_callsign(self, msg):
         """Extract target callsign from command message"""
-        print(" new new and updated version is being executed")
         if has_console:
             print(f"🎯 extract_target_callsign called with: '{msg}'")
 
@@ -401,6 +400,10 @@ class CommandHandler:
         
         if has_console:
             print(f"🎯 Command: '{command}'")
+
+        # Commands that NEVER have targets (always local)
+        if command in ['GROUP', 'KB', 'TOPIC', 'SEARCH']:
+            return None
         
         # Special handling for CTCPING command
         if command == 'CTCPING':
@@ -3060,8 +3063,8 @@ class CommandHandler:
             ("OE1ABC-5", "TEST", f"!TIME {self.my_callsign}", False, False, None, "Test-Gruppe (User, Groups OFF) → keine Ausführung"),
             
             # === Direkt ohne Target ===
-            (self.admin_callsign_base, self.my_callsign, "!TIME", True, False, None, "Direkt ohne Target (Admin) → keine Ausführung"),
-            ("OE1ABC-5", self.my_callsign, "!DICE", True, False, None, "Direkt ohne Target (User) → keine Ausführung"),
+            (self.admin_callsign_base, self.my_callsign, "!TIME", True, True, 'direct', "Direkt ohne Target (Admin) → lokale Ausführung"),
+            ("OE1ABC-5", self.my_callsign, "!DICE", True, True, 'direct', "Direkt ohne Target (User) → keine Ausführung"),
             
             # === Direkt mit my_callsign Target ===
             (self.admin_callsign_base, self.my_callsign, f"!TIME {self.my_callsign}", True, True, 'direct', "Direkt mit Target (Admin) → Ausführung"),
@@ -3074,6 +3077,24 @@ class CommandHandler:
             # === Edge Cases ===
             ("OE1ABC-5", "20", "!WX OE1ABC-5", True, False, None, "Gruppe mit fremdem Target → keine Ausführung"),
             (self.my_callsign, "20", f"!WX {self.my_callsign}", True, True, 'group', "Eigene Nachricht mit Target → Ausführung"),
+
+            # === Self-Command Tests (ADD HERE) ===
+            (self.my_callsign, self.my_callsign, "!GROUP", True, True, 'direct', "Eigener !group Befehl → lokale Ausführung, zeigt aktuellen Status"),
+            (self.my_callsign, self.my_callsign, "!GROUP ON", True, True, 'direct', "Eigener !group on Befehl → lokale Ausführung, aktiviert Groups"),
+            (self.my_callsign, self.my_callsign, "!GROUP OFF", True, True, 'direct', "Eigener !group off Befehl → lokale Ausführung, deaktiviert Groups"),
+            (self.my_callsign, self.my_callsign, "!KB", True, True, 'direct', "Eigener !kb Befehl → lokale Ausführung, zeigt leere Blocklist"),
+            (self.my_callsign, self.my_callsign, "!KB OE1ABC-12", True, True, 'direct', "Eigener !kb add Befehl → lokale Ausführung, blockiert Callsign"),
+            (self.my_callsign, self.my_callsign, "!KB call:OE1ABC-12", True, True, 'direct', "Eigener !kb add Befehl → lokale Ausführung, blockiert Callsign"),
+            (self.my_callsign, self.my_callsign, "!KB OE1ABC-12 DEL", True, True, 'direct', "Eigener !kb del Befehl → lokale Ausführung, entfernt Blockierung"),
+            (self.my_callsign, self.my_callsign, "!SEARCH OE5HWN-12", True, True, 'direct', "Eigener !search Befehl → lokale Ausführung, sucht Messages"),
+            (self.my_callsign, self.my_callsign, "!SEARCH call:OE5HWN-12", True, True, 'direct', "Eigener !search Befehl → lokale Ausführung, sucht Messages"),
+
+            (self.my_callsign, self.my_callsign, "!TOPIC", True, True, 'direct', "Eigener !topic Befehl → lokale Ausführung, zeigt baken an"),
+            (self.my_callsign, self.my_callsign, '!topic 9999 "Test Beacon every " interval:5', True, True, 'direct', "Eigener !topic Befehl → setzt bake"),
+            (self.my_callsign, self.my_callsign, "!TOPIC", True, True, 'direct', "Eigener !topic Befehl → lokale Ausführung, zeigt baken an"),
+            (self.my_callsign, self.my_callsign, '!topic delete 9999', True, True, 'direct', "Eigener !topic Befehl → löscht bake"),
+
+
         ]
         
         results = []
@@ -3400,7 +3421,7 @@ class CommandHandler:
             ("OE5HWN-12", "20", "!WX OE1ABC-5", True, False, None, "Eingehend Gruppe mit fremdem Target → no execute"),
             ("OE5HWN-12", "20", "!WX", True, False, None, "Eingehend Gruppe ohne Target → no execute"),
             ("OE5HWN-12", self.my_callsign, f"!TIME {self.my_callsign}", True, True, 'direct', "Eingehend direkt mit unserem Target → execute"),
-            ("OE5HWN-12", self.my_callsign, "!TIME", True, False, None, "Eingehend direkt ohne Target → no execute"),
+            ("OE5HWN-12", self.my_callsign, "!TIME", True, True, 'direct', "Eingehend direkt ohne Target → execute"),
             
             # === ADMIN OVERRIDES ===
             (self.admin_callsign_base, "20", f"!WX {self.my_callsign}", False, True, 'group', "Admin override bei Groups OFF"),
@@ -3939,11 +3960,11 @@ class CommandHandler:
            ("DK5EN-99", self.my_callsign, f"!MHEARD LIMIT:5 {self.my_callsign}", True, 'direct', "DK5EN-99", "MHeard request with our target should execute"),
            ("DK5EN-99", self.my_callsign, f"!USERINFO {self.my_callsign}", True, 'direct', "DK5EN-99", "UserInfo request with our target should execute"),
            
-           # Direct commands to us without target - should NOT execute
-           ("DK5EN-99", self.my_callsign, "!WX", False, None, None, "Weather request without target should not execute"),
-           ("DK5EN-99", self.my_callsign, "!TIME", False, None, None, "Time request without target should not execute"),
-           ("DK5EN-99", self.my_callsign, "!DICE", False, None, None, "Dice request without target should not execute"),
-           ("DK5EN-99", self.my_callsign, "!STATS", False, None, None, "Stats request without target should not execute"),
+           # Direct commands to us without target - should execute now
+           ("OE5HWN-12", self.my_callsign, "!WX", True, 'direct', "OE5HWN-12", "Weather request without target should send out our WX report"),
+           ("OE5HWN-12", self.my_callsign, "!TIME", True, 'direct', "OE5HWN-12", "Time request without target should send out our time"),
+           ("OE5HWN-12", self.my_callsign, "!DICE", True, 'direct', "OE5HWN-12", "Dice request without target should send out our dice"),
+           ("OE5HWN-12", self.my_callsign, "!STATS", True, 'direct', "OE5HWN-12", "Stats request without target should not execute"),
            
            # Direct commands to us with other target - should NOT execute
            ("DK5EN-99", self.my_callsign, "!WX OE5HWN-12", False, None, None, "Weather request with other target should not execute"),
