@@ -14,7 +14,7 @@ from dbus_next.constants import BusType
 from dbus_next.errors import DBusError, InterfaceNotFoundError
 from dbus_next.service import ServiceInterface, method
 
-VERSION="v0.47.0"
+VERSION="v0.48.0"
 
 has_console = sys.stdout.isatty()
 
@@ -174,7 +174,7 @@ def decode_binary_message(byte_msg):
       message = remaining_msg[split_idx:remaining_msg.find(b'\00')].decode("utf-8", errors="ignore").strip()
 
       #Etwas bit banging, weil die Binaerdaten am Ende immer gleich aussehen
-      [zero, hardware_id, lora_mod, fcs, fw, lasthw, fw_subver, ending, time_ms ] = unpack('<BBBHBBBBI', byte_msg[-14:-1])
+      [zero, hardware_id, lora_mod, fcs, fw, lasthw, fw_sub, ending, time_ms ] = unpack('<BBBHBBBBI', byte_msg[-14:-1])
 
 
       # lasthw aufteilen
@@ -233,7 +233,7 @@ def decode_binary_message(byte_msg):
           "hardware_id", 
           "lora_mod", 
           "fw", 
-          "fw_subver", 
+          "fw_sub", 
           "last_hw_id",
           "last_sending"
           ]}
@@ -379,7 +379,8 @@ def transform_common_fields(input_dict):
         "src_type": "ble",
         #"firmware": str(input_dict.get("fw","")) + ascii_char(input_dict.get("fw_subver")),
         "firmware": input_dict.get("fw",""),
-        "fw_sub": input_dict.get("fw_sub"),
+        #"fw_sub": input_dict.get("fw_sub"),
+        "fw_sub": ascii_char(input_dict.get("fw_sub")) if input_dict.get("fw_sub") else None,
         "via": input_dict.get("path"),
         "max_hop": input_dict.get("max_hop"),
         "mesh_info": input_dict.get("mesh_info"),
