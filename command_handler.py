@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from meteo import WeatherService
 from typing import Dict, Optional
 
-VERSION="v0.60.0"
+VERSION="v0.61.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -222,11 +222,22 @@ class CommandHandler:
         if has_console:
             print(f"🔍 Command execution check: src='{src}', dst='{dst}', msg='{msg[:20]}...'")
         
-        # Invalid destinations never execute
+        # Destinations to all .. 
+        #if dst in ['*', 'ALL', '']:
+            #if has_console:
+            #    print(f"🔍 → Invalid dst '{dst}' - NO EXECUTION")
+            #return False, None
+
         if dst in ['*', 'ALL', '']:
-            if has_console:
-                print(f"🔍 → Invalid dst '{dst}' - NO EXECUTION")
-            return False, None
+            # Nur eigene Befehle an Broadcast-Destinationen ausführen
+            if src == self.my_callsign:
+                if has_console:
+                    print(f"🔍 → Own broadcast command '{dst}' - EXECUTE")
+                return True, 'group'
+            else:
+                if has_console:
+                    print(f"🔍 → Remote broadcast command '{dst}' from {src} - NO EXECUTION")
+                return False, None
         
         target = self.extract_target_callsign(msg)
     
@@ -2813,10 +2824,6 @@ class CommandHandler:
         return chunks[:MAX_CHUNKS]
 
 
-
-
-
-
     async def handle_topic(self, kwargs, requester):
         """Manage group beacon messages"""
         if not self._is_admin(requester):
@@ -3041,7 +3048,11 @@ class CommandHandler:
         test_cases = [
             # (src, dst, msg, groups_enabled, expected_execution, expected_type, description)
             
-            # === Leeres/ungültiges Ziel ===
+            # === Leeres Ziel ===
+            (self.my_callsign, "*", "!TIME", True, True, 'group', "Eigener Time-Befehl an alle → Broadcast"),
+            (self.my_callsign, "ALL", "!WX", True, True, 'group', "Eigener Weather-Befehl an alle → Broadcast"),
+            (self.my_callsign, "", "!USERINFO", True, True, 'group', "Eigener UserInfo an leeres Ziel → Broadcast"),
+
             ("OE1ABC-5", "", "!WX", True, False, None, "Leeres Ziel → keine Ausführung"),
             ("OE1ABC-5", "*", "!WX", True, False, None, "Ungültiges Ziel (*) → keine Ausführung"),
             ("OE1ABC-5", "ALL", "!WX", True, False, None, "Ungültiges Ziel (ALL) → keine Ausführung"),
