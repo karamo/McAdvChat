@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from meteo import WeatherService
 from typing import Dict, Optional
 
-VERSION="v0.61.0"
+VERSION="v0.62.0"
 
 # Response chunking constants
 MAX_RESPONSE_LENGTH = 140  # Maximum characters per message chunk
@@ -505,6 +505,10 @@ class CommandHandler:
         """Handle incoming messages and check for commands"""
         message_data = routed_message['data']
         src_type = message_data.get('src_type')
+        type = message_data.get('type')
+        
+        if type == "pos":
+           return
 
         if 'msg' not in message_data:
             return
