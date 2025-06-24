@@ -4,19 +4,19 @@ McApp is a single page, client rendered, web application. It should run on every
 Rendering on the client, the Raspberry Pi is only sending and receiving UDP, Bluetooth LoRa and TCP web traffic.
 - No LightSQL - we have an SD Card that does not handle well constant writes
 - no PHP as this means, we need page reloads which is slow and not so elegant in 2025, just static web page is retrieved once
-- On initial page load, a dump from the UDP proxy gets sent to your browser. So every time you refresh your browser, you get a fresh reload.
+- On initial page load, a dump from the mcproxy server component gets sent to your browser. Every time you refresh your browser, you get a fresh reload.
 - Try to install the app on your mobile phone by storing it as icon on your home screen
 
 .. please refer to the install guide, as it has screenshots available
 
-### 🧱 `release.sh` – Build & Publis (hidden, not public)
+### 🧱 `release.sh` – Build & Publis (not public)
 
-You can install this app, I am constantly updating it, to refelect latest issues and development of MeshCom
+I am constantly updating the app, to refelect latest issues and development of MeshCom
 
-How I package my application with the release script:
-- is building the WebApp (`npm run build`)
+How the application is packaged wit the release script:
+- building the WebApp (`npm run build`)
 - tar-balls the `/dist` folder
-- automatically creates the `release.json` with Metadata (version, date)
+- automatically creates the `release.htm` with Metadata (version, date)
 - generates a `CHANGELOG.md` that shows what files have been changed
 - automaticall increments `Minor`-version (`vX.Y.0`)
 - create a new GitHub Release and then pushes `dist.tar.gz` in the public Repo that the whole world has access to
@@ -30,7 +30,7 @@ There are scripts, that are stored on GitHub, so they are ever green to be execu
 
 
 
-# McApp Pflichtenheft 
+# Das McApp Pflichtenheft 
 
 Das MashCom McApp-Projekt zerfällt in zwei Komponenten: 
 - Frontend, das hübsch, responsive und Mulit-Device fähig ist
@@ -42,6 +42,7 @@ Das MashCom McApp-Projekt zerfällt in zwei Komponenten:
     - Muss Dark Mode fähig sein
     - Muss sich an den Bildschirm dynamisch anpassen aka responsive design
     - Muss regelmäßig mit security fixes versorgt werden, da in den Bibliotheken vulnerabilities sein können
+    - Muss ein Remote Command Interface haben, as sich abschalten lässt
        
   - Konnektivität
      - Muss sich mit dem MeshCom Node verbinden können
@@ -88,7 +89,7 @@ Das MashCom McApp-Projekt zerfällt in zwei Komponenten:
 - Das Server Backend 
     - Läuft auf einem Raspi Pi Zero 2W, weil der besonders stromsparend ist und mehr als ausreichend ist für unsere Zwecke
     - Erhält über UDP alle Nachrichten vom MeshCom node (--extupip 192... und --extudp on nicht vergessen!)
-    - Spricht ebenso das Bluetoth Protokoll, für eine stabilere Übertragung mit mehr Daten und mehr Möglichkeiten
+    - Spricht ebenso Bluetoth Protokoll, für eine stabilere Übertragung mit mehr Daten und mehr Möglichkeiten
     - Implementiert ein Keep-Alive über Bluetooth und verbindet sich automatisch neu, falls die Verbindung verloren geht
     - Setzt die Zeitzone automatisch auf dem MeshCom Node, berücksichtigt Sommer/Winterzeit
     - Muss UTF-8 und APRS Protokoll Checks durchführen, weil es immer wieder illegale Zeichen gibt, die dann zu Abstürzen führen
@@ -113,13 +114,13 @@ Das MashCom McApp-Projekt zerfällt in zwei Komponenten:
 Was noch fehlt:
 - Auslesen von Umweltsensoren, inklusive Dashboard zur Anzeige der Statistiken
     - Aktuell noch keinen echten UseCase dafür, da man die Umweltsensoren für die Implementierung benötigt
-    - Bräuche dazu erst mal LoRa Pakete, wo diese Infos drin stecken
+    - Bräuchte dazu erst mal LoRa Pakete, wo diese Infos drin stecken
 
 
 # Vision: McAdvChat - der "MeshCom Advanced Chat"
 - Was ich eigentlich vor hatte um das Projekt voran zu bringen
 
-## - “Robuste Echtzeit-Übertragung von Chatnachrichten über fehleranfällige Broadcast-Kanäle mittels Paketfragmentierung, Kompression und Vorwärtsfehlerkorrektur” -
+## - “Robuste Übertragung von Chatnachrichten über fehleranfällige Broadcast-Kanäle mittels Paketfragmentierung, Kompression und Vorwärtsfehlerkorrektur” -
 
 # Disclaimer (oder warum das alles nicht so richtig geht), nach intensiven Forschungen
 
@@ -131,7 +132,7 @@ Was noch fehlt:
      - Allowed: A–Z, a–z, 0–9, common punctuation
      - Not allowed: _binary_data_, _emoji_, _extended_Unicode_
 
-- MeshCom nutzt UTF-8, mit der Besonderheit dass bei der Übertragung über UDP das JSON doppelt stringified ist
+- MeshCom nutzt UTF-8, mit der Besonderheit, dass bei der Übertragung über UDP das JSON doppelt stringified ist
 
 - MeshCom kann unsafe Characters übertragen, besonders wenn ein E22-Node mit unsauberer Spannungsversorgung betrieben wird
      - der rohe Byte-Strom kann toxisch sein und sollte dringend mehrere sanitizing Schritte durchlaufen 	
