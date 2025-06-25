@@ -210,11 +210,11 @@ fi
 
 fi
 
-count=$(ls -1d $INSTALL_DIR-* 2>/dev/null | wc -l)
-if [ "$count" -gt 2 ]; then
-    ls -1dt $INSTALL_DIR-* | tail -n +3 | xargs rm -rf
-    echo "Cleaned up $((count - 2)) old webapp installations"
-fi
+#count=$(ls -1d $INSTALL_DIR-* 2>/dev/null | wc -l)
+#if [ "$count" -gt 2 ]; then
+#    ls -1dt $INSTALL_DIR-* | tail -n +3 | xargs rm -rf
+#    echo "Cleaned up $((count - 2)) old webapp installations"
+#fi
 
 
 # --- Python-Skript Update ---
