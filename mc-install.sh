@@ -216,6 +216,17 @@ fi
 #    echo "Cleaned up $((count - 2)) old webapp installations"
 #fi
 
+shopt -s nullglob
+dirs=($INSTALL_DIR-*)
+shopt -u nullglob
+
+count=${#dirs[@]}
+if [ "$count" -gt 2 ]; then
+    # Sort by modification time, remove oldest
+    printf '%s\n' "${dirs[@]}" | xargs ls -1dt | tail -n +3 | xargs rm -rf
+    echo "Cleaned up $((count - 2)) old webapp installations"
+fi
+
 
 # --- Python-Skript Update ---
 if version_gt "$PY_REMOTE_VERSION" "$PY_LOCAL_VERSION"; then
