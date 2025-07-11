@@ -1,10 +1,15 @@
-┌─────────────────────────────┐
-                    │     WebSocket Clients       │
-                    │   (Vue.js SPA Frontend)     │
-                    └─────────────┬───────────────┘
-                                  │ WSS:2981
-                                  │ (via Caddy proxy)
-                                  │
+```mermaid
+flowchart TD
+    A["`WebSocket Clients
+(Vue.js SPA Frontend)`"] -->|"`WSS:2981
+(via Caddy proxy)`"| B("`MESSAGE ROUTER
+...`")
+    B --> C{Let me think}
+    C -->|One| D[Laptop]
+    C -->|Two| E[iPhone]
+    C -->|Three| F[fa:fa-car Car]
+```
+
     ┌─────────────────────────────▼─────────────────────────────┐
     │                MESSAGE ROUTER                             │
     │           (Central Hub - C2-mc-ws.py)                     │
